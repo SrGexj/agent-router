@@ -8,10 +8,10 @@ import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { reduceEvents } from "../src/core/reducer.mjs";
 import { parseJsonl } from "../src/core/store.mjs";
+import { accessMiddleware, decideAccess, LOCAL_HOST } from "./acceso.mjs";
 
 const SAFE_ID = /^[A-Za-z0-9_-]+$/;
 const LABELS = new Set(["asistente", "programador", "opus"]);
-const LOCAL_HOST = /^(127\.0\.0\.1|localhost|\[::1\]):\d+$/;
 const DIST = fileURLToPath(new URL("../dashboard/dist", import.meta.url));
 
 // Lee solo lo nuevo de cada archivo, por bytes, y solo líneas completas.
@@ -43,18 +43,23 @@ async function reducedRuns(store, limit) {
   return runs.filter(Boolean);
 }
 
-// Solo desde el propio dashboard: Host local (contra DNS rebinding) y, si hay Origin, el mismo que el Host (contra CSRF).
-function sameOriginGuard(req, res, next) {
+// Solo desde el propio dashboard, contra DNS rebinding y CSRF.
+// Sin token: Host local y, si hay Origin, el mismo que el Host.
+// Con token (túnel): el middleware de acceso ya exigió la cookie a todo lo que no es local; aquí el Host público vale,
+// pero el Origin es obligatorio y debe ser el propio Host (http o https), así que otro sitio no puede disparar el POST.
+const sameOriginGuard = (accessToken) => (req, res, next) => {
   const host = req.headers.host ?? "";
   const origin = req.headers.origin;
-  if (!LOCAL_HOST.test(host) || (origin !== undefined && origin !== `http://${host}`)) {
-    return res.status(403).json({ error: "origen no permitido" });
-  }
+  const ok = accessToken && !LOCAL_HOST.test(host)
+    ? origin === `https://${host}` || origin === `http://${host}`
+    : LOCAL_HOST.test(host) && (origin === undefined || origin === `http://${host}`);
+  if (!ok) return res.status(403).json({ error: "origen no permitido" });
   next();
-}
+};
 
-export function createApp({ store, monitor = null, profileLabels = {}, now = Date.now }) {
+export function createApp({ store, monitor = null, profileLabels = {}, now = Date.now, accessToken = null }) {
   const app = express();
+  if (accessToken) app.use(accessMiddleware(accessToken));
   app.get("/health", (_req, res) => res.json({ ok: true }));
 
   app.get("/api/runs", async (req, res) => {
@@ -70,7 +75,7 @@ export function createApp({ store, monitor = null, profileLabels = {}, now = Dat
   });
 
   // Corrección manual de quién debía llevar la tarea (dato de entrenamiento). label null la quita.
-  app.post("/api/runs/:id/label", sameOriginGuard, express.json({ limit: "1kb" }), async (req, res) => {
+  app.post("/api/runs/:id/label", sameOriginGuard(accessToken), express.json({ limit: "1kb" }), async (req, res) => {
     if (!SAFE_ID.test(req.params.id)) return res.status(400).json({ error: "id no válido" });
     const label = req.body?.label;
     if (label !== null && !LABELS.has(label)) return res.status(400).json({ error: "etiqueta no válida" });
@@ -103,11 +108,21 @@ export function createApp({ store, monitor = null, profileLabels = {}, now = Dat
   return app;
 }
 
-export async function startServer({ store, host, port, monitor = null, profileLabels = {}, now = Date.now }) {
+export async function startServer({ store, host, port, monitor = null, profileLabels = {}, now = Date.now, accessToken = null }) {
   await mkdir(store.runsDir, { recursive: true });
-  const app = createApp({ store, monitor, profileLabels, now });
+  const app = createApp({ store, monitor, profileLabels, now, accessToken });
   const server = createServer(app);
-  const wss = new WebSocketServer({ server, path: "/ws" });
+  const wss = new WebSocketServer({ noServer: true });
+  // El upgrade no pasa por Express: se aplica aquí la misma comprobación (cookie o acceso local).
+  server.on("upgrade", (req, socket, head) => {
+    const allowed = decideAccess({ method: "UPGRADE", url: req.url, headers: req.headers }, accessToken).action === "allow";
+    if (!allowed) {
+      socket.end("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\nContent-Type: text/plain\r\nContent-Length: 13\r\n\r\nNo autorizado");
+      return socket.destroy();
+    }
+    if (new URL(req.url, "http://x").pathname !== "/ws") return socket.destroy();
+    wss.handleUpgrade(req, socket, head, (ws) => wss.emit("connection", ws, req));
+  });
   const tail = createTailer();
 
   // Marca lo que ya existe como leído: el hello lo manda entero.

@@ -430,8 +430,15 @@ try {
     ];
     await writeFile(join(home, "runs", "final-1.jsonl"), ev.map((e) => JSON.stringify(e)).join("\n") + "\n");
     await waitText("Resumen final de gasto");
-    await page.$$eval(".runs .rtask", (els) => els.find((e) => e.textContent === "Resumen final de gasto").closest("button").click());
-    await page.waitForFunction(() => document.querySelector(".badge em")?.textContent === "final-1", { timeout: 5000 });
+    // La ejecución llega por el socket en cuanto el servidor lee el archivo: puede aparecer en la lista a medias y recolocarse
+    // (En curso -> Terminadas) al llegar el resto. Se repite el clic hasta que la vista cambie, en vez de fiarlo a un solo clic.
+    await page.waitForFunction(() => {
+      if (document.querySelector(".badge em")?.textContent === "final-1") return true;
+      [...document.querySelectorAll(".runs .rtask")].find((e) => e.textContent === "Resumen final de gasto")?.closest("button").click();
+      return false;
+    }, { timeout: 10_000, polling: 250 }).catch(async () => fail(`No se selecciona final-1. badge=${await page.$eval(".badge", (e) => e.outerHTML)} sel=${await page.$$eval(".runs button.sel .rtask", (e) => e.map((x) => x.textContent))}`));
+    // Y a que el archivo se haya leído entero (si se eligió a medias, la escena aún no trae el resumen).
+    await page.waitForFunction(() => document.querySelector(".card")?.innerText.includes("2 encargos · 4,50 $"), { timeout: 10_000 }).catch(() => {});
     await page.evaluate(() => new Promise((r) => setTimeout(r, 200)));
     const card = await page.$eval(".card", (el) => el.innerText);
     for (const x of ["Opus · 1,40 $ · 150 k tok", "Sonnet 5.5 · 1 encargo · 3,00 $ · 1,1 M tok", "Haiku 5.5 · 1 encargo · 0,10 $ · 1 M tok", "2 encargos · 4,50 $ · 2,3 M tok · 3 min 10 s"]) {

@@ -128,6 +128,7 @@ Solo `src/config.mjs` lee variables de entorno. El resto del código recibe la c
 | `ROUTER_HOST` | `127.0.0.1` | Host del servidor. Un valor no local exige `ROUTER_ALLOW_REMOTE=1`. |
 | `ROUTER_PORT` | `4317` | Puerto del dashboard. |
 | `ROUTER_ALLOW_REMOTE` | sin definir | `1` permite un host no local. |
+| `ROUTER_ACCESS_TOKEN` | sin definir | Token de 32 caracteres o más para exponer el dashboard por un túnel (Cloudflare). Sin definir, o si es más corto, no hay autenticación (aviso en stderr). Con él, todo acceso que no sea local directo exige la cookie `router_token`; abre una vez `https://tu-túnel/?token=<valor>` y se guarda 30 días. |
 | `ROUTER_PERMISSION_MODE` | `auto` | `acceptEdits`, `auto`, `manual`, `dontAsk` o `plan`. `bypassPermissions` no está permitido. |
 | `ROUTER_EFFORT` | sin definir | Esfuerzo por defecto: `low`, `medium`, `high`, `xhigh` o `max`. |
 | `ROUTER_FALLBACK_MODEL` | `sonnet` | Modelo de respaldo si Opus está saturado. |

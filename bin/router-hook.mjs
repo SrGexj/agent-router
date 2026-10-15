@@ -10,6 +10,7 @@ import { createStore } from "../src/core/store.mjs";
 import { createSessions } from "../src/core/sessions.mjs";
 import { interruptedIn, liveAgentUsageDue, liveUsageDue, translateHook } from "../src/core/hooks.mjs";
 import { MAX_FULL, readFrom, readSince, transcriptSize } from "../src/core/transcript.mjs";
+import { advanceContext, startContext } from "../src/core/context.mjs";
 import { summarizeSubagent } from "../src/core/subagent.mjs";
 import { advanceUsage, agentTranscriptPath, startUsage, usageFromTranscript } from "../src/core/usage.mjs";
 import { makeRunId } from "../src/core/run.mjs";
@@ -42,6 +43,19 @@ async function orchestratorUsageOf(path, session) {
     else if (size - state.offset > MAX_FULL) state = { ...state, offset: size - MAX_FULL }; // readSince solo devuelve el final
     const res = advanceUsage(state, await readSince(path, state.offset, MAX_FULL), { sidechain: false });
     return { usage: res.usage, state: res.state };
+  } catch { return null; }
+}
+
+// Contexto del orquestador por turno, incremental como el gasto: el estado (offset, turno, ids recientes) vive en la sesión.
+async function orchestratorContextOf(path, session, now) {
+  try {
+    if (!path || session.transcriptOffset == null) return null;
+    let state = session.contextState ?? startContext(session.transcriptOffset);
+    const size = await transcriptSize(path);
+    if (size == null) return null;
+    if (size < state.offset) state = startContext(session.transcriptOffset);
+    else if (size - state.offset > MAX_FULL) state = { ...state, offset: size - MAX_FULL };
+    return advanceContext(state, await readSince(path, state.offset, MAX_FULL), now);
   } catch { return null; }
 }
 
@@ -170,6 +184,8 @@ try {
   if ((closes && session.runId) || liveUsageDue(payload, session, now)) {
     const o = await orchestratorUsageOf(payload.transcript_path, session);
     if (o) { ctx.orchestratorUsage = o.usage; ctx.usageState = o.state; }
+    const c = await orchestratorContextOf(payload.transcript_path, session, now);
+    if (c) { ctx.contextEvents = c.events; ctx.contextState = c.state; }
   }
 
   const res = translateHook(payload, session, now, makeRunId, ctx);

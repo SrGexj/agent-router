@@ -156,7 +156,13 @@ export function reduceRun(run, ev) {
       return { ...base, compactions: [...(base.compactions ?? []), { trigger: ev.trigger ?? null, pendingCount: ev.pendingCount ?? 0, t: ev.t }] };
     case "context":
       // Contexto actual (último turno) según la statusline; se sobrescribe en cada cambio.
-      return { ...base, context: { tokens: ev.tokens, model: ev.model ?? null, window: ev.window ?? null, t: ev.t } };
+      // Los eventos por turno (del transcript) llevan `turn`: uno ya visto no cambia nada (releer no duplica ni retrocede).
+      if (ev.turn != null && ev.turn <= (run.context?.turn ?? 0)) return run;
+      const turn = ev.turn ?? run.context?.turn;
+      return {
+        ...base,
+        context: { tokens: ev.tokens, model: ev.model ?? null, window: ev.window ?? run.context?.window ?? null, ...(turn != null ? { turn } : {}), t: ev.t }
+      };
     case "compact_stats": {
       // Datos del límite de compactación leídos del transcript; upsert por id (el mismo límite puede llegar dos veces).
       const byId = new Map((base.compactStats ?? []).map((c) => [c.id, c]));

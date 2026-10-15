@@ -78,7 +78,7 @@ export function createParser() {
           taskId: msg.task_id,
           status: msg.status === "completed" ? "completed" : msg.status === "killed" ? "killed" : "failed",
           summary: msg.summary ?? "",
-          model: taskModel.get(msg.task_id) ?? null,
+          ...(taskModel.has(msg.task_id) ? { model: taskModel.get(msg.task_id) } : {}),
           tokens: msg.usage?.total_tokens ?? null,
           toolUses: msg.usage?.tool_uses ?? null,
           durationMs: msg.usage?.duration_ms ?? null,

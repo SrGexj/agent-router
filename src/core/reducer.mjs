@@ -118,7 +118,7 @@ export function reduceRun(run, ev) {
       // Un cierre sin arranque (agentes internos de Claude Code en datos antiguos) no es un encargo.
       if (!(ev.taskId in base.tasks)) return base;
       return withTask(base, ev.taskId, {
-        status: ev.status, endedAt: ev.t, error: ev.error ?? null, ...(ev.model ? { model: ev.model } : {}), summary: ev.summary ?? "", result: ev.result ?? base.tasks[ev.taskId]?.result ?? "",
+        status: ev.status, endedAt: ev.t, error: ev.error ?? null, ...(ev.permissionDenied ? { permissionDenied: true } : {}), ...(ev.model ? { model: ev.model } : {}), summary: ev.summary ?? "", result: ev.result ?? base.tasks[ev.taskId]?.result ?? "",
         tokens: ev.tokens ?? base.tasks[ev.taskId]?.tokens ?? null,
         toolUses: ev.toolUses ?? base.tasks[ev.taskId]?.toolUses ?? null,
         durationMs: ev.durationMs ?? base.tasks[ev.taskId]?.durationMs ?? null

@@ -144,13 +144,30 @@ describe("task_end con estado, modelo, tokens y duración reales", () => {
     expect(ofType(events, "task_end")[0]).toMatchObject({ status: "completed", model: null, tokens: null });
   });
 
-  it("un permiso denegado a ese subagente lo marca como failed", () => {
+  it("permiso denegado y agente recuperado: completed, con la marca permissionDenied", () => {
     const { events } = play([
       { hook_event_name: "SubagentStart", agent_id: "a" },
       { hook_event_name: "PermissionDenied", agent_id: "a", tool_name: "Bash" },
-      { hook_event_name: "SubagentStop", agent_id: "a" }
+      [{ hook_event_name: "SubagentStop", agent_id: "a" }, { agentSummary: { status: "completed", error: null } }]
     ]);
-    expect(ofType(events, "task_end")[0]).toMatchObject({ status: "failed", error: "permission" });
+    expect(ofType(events, "task_end")[0]).toMatchObject({ status: "completed", permissionDenied: true });
+    const run = reduceEvents([{ type: "run_start", runId: "r", task: "x", mode: "sesion", model: "opus", t: 1 }, { type: "task_start", taskId: "a", agent: "x", description: "", prompt: "", t: 2 }, ofType(events, "task_end")[0]]);
+    expect(run.tasks.a).toMatchObject({ status: "completed", permissionDenied: true });
+  });
+
+  it("permiso denegado y el agente termina por ese error: failed/permission", () => {
+    const text = [
+      JSON.stringify({ type: "assistant", timestamp: "2026-10-15T10:00:00.000Z", message: { id: "m", model: "claude-sonnet-5-5", usage: { input_tokens: 1 }, content: [{ type: "tool_use", id: "t" }] } }),
+      JSON.stringify({ type: "user", timestamp: "2026-10-15T10:00:01.000Z", message: { content: [{ type: "tool_result", tool_use_id: "t", is_error: true, content: "Permission to use Bash has been denied." }] } })
+    ].join("\n");
+    const summary = summarizeSubagent(text);
+    expect(summary).toMatchObject({ status: "failed", error: "permission" });
+    const { events } = play([
+      { hook_event_name: "SubagentStart", agent_id: "a" },
+      { hook_event_name: "PermissionDenied", agent_id: "a" },
+      [{ hook_event_name: "SubagentStop", agent_id: "a" }, { agentSummary: summary }]
+    ]);
+    expect(ofType(events, "task_end")[0]).toMatchObject({ status: "failed", error: "permission", permissionDenied: true });
   });
 
   it("task_start lleva el modelo si ya se conoce", () => {

@@ -212,14 +212,14 @@ export function translateHook(p, session, now, makeRunId, ctx = {}) {
       if (session.agents && !session.agents[p.agent_id]) return keep([]);
       const sum = ctx.agentSummary ?? {};
       const denied = session.agents?.[p.agent_id]?.denied === true;
-      const failedByPermission = denied && (sum.status ?? "completed") === "completed";
-      const status = failedByPermission ? "failed" : sum.status ?? "completed";
-      const error = failedByPermission ? "permission" : sum.error ?? null;
+      // Un permiso denegado no hace fallar el encargo por sí solo: el estado sale del final del transcript.
+      const status = sum.status ?? "completed";
+      const error = sum.error ?? null;
       // Lectura completa del transcript: sustituye a las instantáneas en vivo. El estado incremental ya no hace falta.
       const res = keep([
         ...usageEvents("task_usage", ctx.agentUsage, t, { taskId: p.agent_id, snapshot: true }),
         {
-          type: "task_end", taskId: p.agent_id, status, ...(error ? { error } : {}), model: sum.model ?? null,
+          type: "task_end", taskId: p.agent_id, status, ...(error ? { error } : {}), ...(denied ? { permissionDenied: true } : {}), model: sum.model ?? null,
           summary: short(p.last_assistant_message, 200), result: short(p.last_assistant_message, RESULT_MAX),
           tokens: sum.tokens ?? null, toolUses: sum.toolUses ?? null, durationMs: sum.durationMs ?? null, t
         }

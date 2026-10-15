@@ -5,6 +5,8 @@ const SYNTHETIC = "<synthetic>";
 const INTERRUPT = "[Request interrupted by user";
 const LIMIT_TEXT = /usage limit|hit your limit|limit reached|rate[ _-]?limit/i;
 
+const PERMISSION_TEXT = /permission|denied|not allowed/i;
+
 const textOf = (content) =>
   typeof content === "string" ? content : (Array.isArray(content) ? content : []).map((b) => (b?.type === "text" ? b.text ?? "" : "")).join(" ");
 
@@ -50,7 +52,11 @@ export function summarizeSubagent(text) {
   const endsInToolError = lastStep?.type === "user" && Array.isArray(lastStep.message.content) && lastStep.message.content.some((b) => b?.type === "tool_result" && b.is_error === true);
   if (interrupted) { status = "killed"; error = "interrupted"; }
   else if (apiError) { status = "failed"; error = LIMIT_TEXT.test(textOf(lastStep.message.content)) ? "limit" : "api"; }
-  else if (endsInToolError) { status = "failed"; error = "tool_error"; }
+  else if (endsInToolError) {
+    status = "failed";
+    const body = lastStep.message.content.map((b) => textOf(b?.content)).join(" ");
+    error = PERMISSION_TEXT.test(body) ? "permission" : "tool_error";
+  }
 
   return {
     status, error, model, tokens,

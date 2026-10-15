@@ -21,7 +21,7 @@ export function nodeFor(agent, model) {
 function withTask(run, taskId, patch) {
   const prev = run.tasks[taskId] ?? {
     id: taskId, agent: "general-purpose", node: "programador", description: "", prompt: "",
-    status: "running", startedAt: null, endedAt: null, model: null, summary: "", result: "", usage: null,
+    status: "running", startedAt: null, endedAt: null, model: null, summary: "", result: "", usage: null, error: null,
     tokens: null, toolUses: null, durationMs: null, tools: 0, lastToolAt: null
   };
   const known = taskId in run.tasks;
@@ -69,21 +69,36 @@ export function reduceRun(run, ev) {
       return withTask(base, ev.taskId, { lastToolAt: ev.t, tools: (prev?.tools ?? 0) + 1 });
     }
     case "task_request":
-      return { ...base, pending: [...(base.pending ?? []), { agent: ev.agent, description: ev.description, prompt: ev.prompt }] };
+      return {
+        ...base,
+        pending: [...(base.pending ?? []), {
+          agent: ev.agent, description: ev.description, prompt: ev.prompt,
+          ...(ev.attempt != null ? { attempt: ev.attempt } : {}),
+          ...(ev.previousAgent ? { previousAgent: ev.previousAgent } : {}),
+          ...(ev.escalated ? { escalated: true } : {})
+        }]
+      };
     case "task_start": {
-      // Los hooks no traen la descripción en SubagentStart: se toma de la llamada a Agent pendiente.
+      // Los hooks no traen la descripción en SubagentStart: se toma de la llamada a Agent pendiente. Si un hook reescribió
+      // el subagent_type no coincide ninguna: se toma la más antigua y se anota qué agente se pidió.
       let { description, prompt } = ev;
       let pending = base.pending ?? [];
+      let extra = {};
       if (!description) {
-        const i = pending.findIndex((r) => r.agent === ev.agent);
+        let i = pending.findIndex((r) => r.agent === ev.agent);
+        const rewritten = i < 0 && pending.length > 0;
+        if (rewritten) i = 0;
         if (i >= 0) {
-          ({ description, prompt } = pending[i]);
+          const { agent: requested, description: d, prompt: pr, ...retry } = pending[i];
+          ({ description, prompt } = { description: d, prompt: pr });
+          extra = { ...retry, ...(rewritten ? { requestedAgent: requested } : {}) };
           pending = pending.filter((_, j) => j !== i);
         }
       }
+      const node = nodeFor(ev.agent, ev.model);
       return withTask({ ...base, pending }, ev.taskId, {
-        agent: ev.agent, node: nodeFor(ev.agent, null), description,
-        prompt, status: "running", startedAt: ev.t
+        agent: ev.agent, node, description,
+        prompt, status: "running", startedAt: ev.t, ...extra, ...(ev.model ? { model: ev.model } : {})
       });
     }
     case "task_model": {
@@ -100,8 +115,10 @@ export function reduceRun(run, ev) {
       });
     }
     case "task_end":
+      // Un cierre sin arranque (agentes internos de Claude Code en datos antiguos) no es un encargo.
+      if (!(ev.taskId in base.tasks)) return base;
       return withTask(base, ev.taskId, {
-        status: ev.status, endedAt: ev.t, summary: ev.summary ?? "", result: ev.result ?? base.tasks[ev.taskId]?.result ?? "",
+        status: ev.status, endedAt: ev.t, error: ev.error ?? null, ...(ev.permissionDenied ? { permissionDenied: true } : {}), ...(ev.model ? { model: ev.model } : {}), summary: ev.summary ?? "", result: ev.result ?? base.tasks[ev.taskId]?.result ?? "",
         tokens: ev.tokens ?? base.tasks[ev.taskId]?.tokens ?? null,
         toolUses: ev.toolUses ?? base.tasks[ev.taskId]?.toolUses ?? null,
         durationMs: ev.durationMs ?? base.tasks[ev.taskId]?.durationMs ?? null
@@ -137,9 +154,16 @@ export function reduceRun(run, ev) {
       return { ...base, routeLabel: ev.label === null ? null : { label: ev.label, t: ev.t } };
     case "compact":
       return { ...base, compactions: [...(base.compactions ?? []), { trigger: ev.trigger ?? null, pendingCount: ev.pendingCount ?? 0, t: ev.t }] };
-    case "context":
+    case "context": {
       // Contexto actual (último turno) según la statusline; se sobrescribe en cada cambio.
-      return { ...base, context: { tokens: ev.tokens, model: ev.model ?? null, window: ev.window ?? null, t: ev.t } };
+      // Los eventos por turno (del transcript) llevan `turn`: uno ya visto no cambia nada (releer no duplica ni retrocede).
+      if (ev.turn != null && ev.turn <= (run.context?.turn ?? 0)) return run;
+      const turn = ev.turn ?? run.context?.turn;
+      return {
+        ...base,
+        context: { tokens: ev.tokens, model: ev.model ?? null, window: ev.window ?? run.context?.window ?? null, ...(turn != null ? { turn } : {}), t: ev.t }
+      };
+    }
     case "compact_stats": {
       // Datos del límite de compactación leídos del transcript; upsert por id (el mismo límite puede llegar dos veces).
       const byId = new Map((base.compactStats ?? []).map((c) => [c.id, c]));

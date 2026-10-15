@@ -50,9 +50,10 @@ describe("reducer de una ejecución", () => {
     expect(run.tasks.a).toMatchObject({ status: "failed", endedAt: 60, summary: "tests en rojo", tokens: 900, toolUses: 4 });
   });
 
-  it("tolera un task_end sin task_start previo", () => {
+  it("ignora un task_end sin task_start previo (en datos antiguos eran agentes internos de Claude Code)", () => {
     const run = reduceEvents([start, { type: "task_end", taskId: "zz", status: "completed", summary: "", t: 5 }]);
-    expect(run.tasks.zz).toMatchObject({ status: "completed", node: "programador" });
+    expect(run.tasks.zz).toBeUndefined();
+    expect(run.taskOrder).toEqual([]);
   });
 
   it("anota la última actividad del orquestador y de cada encargo", () => {

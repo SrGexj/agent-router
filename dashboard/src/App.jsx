@@ -7,6 +7,7 @@ import ThemeToggle from "./ThemeToggle.jsx";
 import { aggregateSavingsByProfile, aggregateShadowByProfile } from "../../src/core/details.mjs";
 import { useLive } from "./live.js";
 import { ProfileLabels, useProfileLabel, useProfileLabels } from "./profiles.js";
+import { Settings, useServerSettings } from "./settings.js";
 import { createEngine } from "./engine.js";
 import { DEMO_EVENTS, DEMO_LENGTH } from "./demo.js";
 import { createAlertNotifier, loadAlertPrefs, saveAlertPrefs } from "./alerts.js";
@@ -56,6 +57,7 @@ export default function App() {
   const onEvent = useCallback((runId, event, run) => engine.onLiveEvent(runId, event, run, Date.now()), [engine]);
   const { runs, quotas, connection, epoch } = useLive(onEvent);
   const profileLabels = useProfileLabels();
+  const settings = useServerSettings();
 
   const [alertPrefs, setAlertPrefs] = useState(() => {
     const p = loadAlertPrefs(safeStorage());
@@ -99,6 +101,7 @@ export default function App() {
 
   return (
     <ProfileLabels.Provider value={profileLabels}>
+    <Settings.Provider value={settings}>
     <main className="page">
       <section className="card">
         <div className="card-top">
@@ -132,6 +135,7 @@ export default function App() {
         {connection === "connected" ? `Conectado a ${location.host}` : connection === "connecting" ? "Conectando…" : "Sin conexión con el servidor · reintentando"}
       </footer>
     </main>
+    </Settings.Provider>
     </ProfileLabels.Provider>
   );
 }

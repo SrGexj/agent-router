@@ -42,7 +42,7 @@ function resolveProfiles(env, home, exists) {
 export const CONFIG_KEYS = Object.freeze([
   "CLAUDE_BIN",
   "ROUTER_HOST", "ROUTER_PORT", "ROUTER_ALLOW_REMOTE", "ROUTER_ACCESS_TOKEN", "ROUTER_PERMISSION_MODE", "ROUTER_EFFORT", "ROUTER_FALLBACK_MODEL", "ROUTER_MAX_BUDGET_USD",
-  "ROUTER_SEAT_USD", "ROUTER_MONITOR_BIN", "ROUTER_MONITOR_WAREHOUSE",
+  "ROUTER_SEAT_USD", "ROUTER_CONTEXT_WARN_TOKENS", "ROUTER_MONITOR_BIN", "ROUTER_MONITOR_WAREHOUSE",
   "ROUTER_SHADOW", "ROUTER_SHADOW_PROVIDER", "ROUTER_SHADOW_MODEL",
   "ROUTER_LAYA_URL", "ROUTER_LAYA_VENV", "ROUTER_LAYA_HF_HOME", "ROUTER_LAYA_PYTHON",
   "ROUTER_PROFILE_LABEL", "ROUTER_PROFILE2_DIR", "ROUTER_PROFILE2_LABEL", "ROUTER_PROFILE2_ALIAS", "ROUTER_PROFILE2_ARGS"
@@ -145,6 +145,8 @@ export function loadConfig(processEnv = process.env, { exists = existsSync, read
     accessToken = null;
   }
 
+  // Contexto del orquestador a partir del cual el dashboard avisa (tokens). Un valor no numérico o ≤ 0 se ignora.
+  const ctxWarn = Number(env.ROUTER_CONTEXT_WARN_TOKENS);
   const budget = env.ROUTER_MAX_BUDGET_USD ? Number(env.ROUTER_MAX_BUDGET_USD) : null;
   const seat = env.ROUTER_SEAT_USD ? Number(env.ROUTER_SEAT_USD) : null;
 
@@ -166,6 +168,7 @@ export function loadConfig(processEnv = process.env, { exists = existsSync, read
     effort: env.ROUTER_EFFORT || null,
     fallbackModel: env.ROUTER_FALLBACK_MODEL ?? "sonnet",
     maxBudgetUsd: Number.isFinite(budget) ? budget : null,
+    contextWarnTokens: Number.isFinite(ctxWarn) && ctxWarn > 0 ? Math.floor(ctxWarn) : 120_000,
     claudeBin: env.CLAUDE_BIN || "claude",
     // Modo sombra: un clasificador anota qué habría elegido; no cambia nada. Proveedor: Laya local ("laya") o Jev vía OpenRouter ("jev").
     shadow: {

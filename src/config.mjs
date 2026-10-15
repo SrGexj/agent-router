@@ -41,7 +41,7 @@ function resolveProfiles(env, home, exists) {
 // ROUTER_HOME no está: sirve para localizar el archivo. HOME, SHELL y CLAUDE_CONFIG_DIR son del entorno de cada proceso.
 export const CONFIG_KEYS = Object.freeze([
   "CLAUDE_BIN",
-  "ROUTER_HOST", "ROUTER_PORT", "ROUTER_ALLOW_REMOTE", "ROUTER_PERMISSION_MODE", "ROUTER_EFFORT", "ROUTER_FALLBACK_MODEL", "ROUTER_MAX_BUDGET_USD",
+  "ROUTER_HOST", "ROUTER_PORT", "ROUTER_ALLOW_REMOTE", "ROUTER_ACCESS_TOKEN", "ROUTER_PERMISSION_MODE", "ROUTER_EFFORT", "ROUTER_FALLBACK_MODEL", "ROUTER_MAX_BUDGET_USD",
   "ROUTER_SEAT_USD", "ROUTER_MONITOR_BIN", "ROUTER_MONITOR_WAREHOUSE",
   "ROUTER_SHADOW", "ROUTER_SHADOW_PROVIDER", "ROUTER_SHADOW_MODEL",
   "ROUTER_LAYA_URL", "ROUTER_LAYA_VENV", "ROUTER_LAYA_HF_HOME", "ROUTER_LAYA_PYTHON",
@@ -138,6 +138,13 @@ export function loadConfig(processEnv = process.env, { exists = existsSync, read
   // Modo sombra: apagado salvo que Laya esté instalada (el instalador crea su venv) o se pida con ROUTER_SHADOW=1.
   const shadowEnabled = env.ROUTER_SHADOW === "1" ? true : env.ROUTER_SHADOW === "0" ? false : exists(join(layaVenv, "bin/laya-serve"));
 
+  // Token de acceso remoto (túnel): con menos de 32 caracteres se ignora y se avisa (nunca se escribe el valor).
+  let accessToken = env.ROUTER_ACCESS_TOKEN || null;
+  if (accessToken && accessToken.length < 32) {
+    warn("ROUTER_ACCESS_TOKEN tiene menos de 32 caracteres: se ignora y el dashboard queda sin autenticación.");
+    accessToken = null;
+  }
+
   const budget = env.ROUTER_MAX_BUDGET_USD ? Number(env.ROUTER_MAX_BUDGET_USD) : null;
   const seat = env.ROUTER_SEAT_USD ? Number(env.ROUTER_SEAT_USD) : null;
 
@@ -154,6 +161,7 @@ export function loadConfig(processEnv = process.env, { exists = existsSync, read
     pendingDir: join(home, "pendientes"),
     host,
     port: Number(env.ROUTER_PORT || 4317),
+    accessToken,
     permissionMode,
     effort: env.ROUTER_EFFORT || null,
     fallbackModel: env.ROUTER_FALLBACK_MODEL ?? "sonnet",

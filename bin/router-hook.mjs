@@ -10,6 +10,7 @@ import { createStore } from "../src/core/store.mjs";
 import { createSessions } from "../src/core/sessions.mjs";
 import { interruptedIn, liveAgentUsageDue, liveUsageDue, translateHook } from "../src/core/hooks.mjs";
 import { MAX_FULL, readFrom, readSince, transcriptSize } from "../src/core/transcript.mjs";
+import { summarizeSubagent } from "../src/core/subagent.mjs";
 import { advanceUsage, agentTranscriptPath, startUsage, usageFromTranscript } from "../src/core/usage.mjs";
 import { makeRunId } from "../src/core/run.mjs";
 import { reduceEvents } from "../src/core/reducer.mjs";
@@ -24,12 +25,9 @@ async function readStdin() {
   return data;
 }
 
-// Leer un transcript para el coste nunca debe hacer fallar el hook: sin datos, sin evento.
-async function usageOf(path, offset, sidechain) {
-  try {
-    if (!path) return null;
-    return usageFromTranscript(await readFrom(path, offset), { sidechain });
-  } catch { return null; }
+// Texto completo del transcript de un subagente; null si no hay ruta o no se puede leer.
+async function agentTextOf(path) {
+  try { return path ? await readFrom(path, 0) : null; } catch { return null; }
 }
 
 // Gasto del orquestador desde session.transcriptOffset, incremental: la sesión guarda hasta dónde se leyó y lo acumulado,
@@ -157,7 +155,12 @@ try {
       if (ctx.interrupted) ctx.orchestratorUsage = (await orchestratorUsageOf(payload.transcript_path, session))?.usage ?? null;
     }
   }
-  if (payload.hook_event_name === "SubagentStop") ctx.agentUsage = await usageOf(agentTranscriptPath(payload), 0, true);
+  if (payload.hook_event_name === "SubagentStop") {
+    const text = await agentTextOf(agentTranscriptPath(payload));
+    ctx.agentUsage = text == null ? null : usageFromTranscript(text, { sidechain: true });
+    ctx.agentSummary = text == null ? null : summarizeSubagent(text);
+  }
+  if (payload.hook_event_name === "SubagentStart") ctx.agentModel = summarizeSubagent(await agentTextOf(agentTranscriptPath(payload)) ?? "").model;
   if (liveAgentUsageDue(payload, session, Date.now())) {
     const a = await agentUsageOf(agentTranscriptPath(payload), session.agentUsage?.[payload.agent_id]?.state);
     if (a) ctx.agentLive = a;

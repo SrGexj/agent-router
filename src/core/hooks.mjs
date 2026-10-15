@@ -52,6 +52,19 @@ export function answerFrom(response, tool) {
 
 const usageEvents = (type, u, t, extra = {}) => (u && Object.keys(u.byModel ?? {}).length ? [{ type, ...extra, byModel: u.byModel, t }] : []);
 
+// Un encargo con la misma descripción (sin mayúsculas ni espacios de más) en la misma ejecución es un reintento.
+// requests: { [descripción normalizada]: { agent, attempt } }, vive en la sesión y se pierde al cerrar la ejecución.
+const normDescription = (d) => String(d ?? "").trim().toLowerCase();
+
+export function retryInfo(requests, description, agent) {
+  const key = normDescription(description);
+  if (!key) return { fields: { attempt: 1 }, requests: null };
+  const prev = requests?.[key];
+  const attempt = (prev?.attempt ?? 0) + 1;
+  const fields = prev ? { attempt, previousAgent: prev.agent, ...(prev.agent !== agent ? { escalated: true } : {}) } : { attempt };
+  return { fields, requests: { ...(requests ?? {}), [key]: { agent, attempt } } };
+}
+
 const INTERRUPT = "[Request interrupted by user";
 
 // Solo cuenta la entrada que escribe Claude Code al pulsar Esc: un mensaje "user" de la sesión
@@ -132,9 +145,9 @@ export function translateHook(p, session, now, makeRunId, ctx = {}) {
   // Con el estrangulado cumplido y datos leídos, la instantánea acumulada va al final y se recuerda cuándo y hasta dónde se leyó.
   const live = liveUsageDue(p, session, t) && ctx.orchestratorUsage;
   const liveAgent = liveAgentUsageDue(p, session, t) && ctx.agentLive?.usage;
-  const keep = (events) => {
+  const keep = (events, patch = null) => {
     let out = events;
-    let next = session;
+    let next = patch ? { ...session, ...patch } : session;
     if (live) {
       out = [...out, ...usageEvents("orchestrator_usage", ctx.orchestratorUsage, t)];
       next = { ...next, lastUsageAt: t, ...(ctx.usageState ? { usageState: ctx.usageState } : {}) };
@@ -151,10 +164,12 @@ export function translateHook(p, session, now, makeRunId, ctx = {}) {
       if (p.agent_id) return keep([{ type: "tool", taskId: p.agent_id, name: p.tool_name, t }]);
       if (AGENT_TOOLS.has(p.tool_name)) {
         const i = p.tool_input ?? {};
+        const agent = i.subagent_type ?? "general-purpose";
+        const retry = retryInfo(session.requests, i.description, agent);
         return keep([{
-          type: "task_request", toolUseId: p.tool_use_id ?? null, agent: i.subagent_type ?? "general-purpose",
-          description: i.description ?? "", prompt: i.prompt ?? "", t
-        }]);
+          type: "task_request", toolUseId: p.tool_use_id ?? null, agent,
+          description: i.description ?? "", prompt: i.prompt ?? "", ...retry.fields, t
+        }], retry.requests ? { requests: retry.requests } : null);
       }
       const tool = { type: "tool", taskId: null, name: p.tool_name, t };
       if (p.tool_name === "AskUserQuestion") {
@@ -178,17 +193,37 @@ export function translateHook(p, session, now, makeRunId, ctx = {}) {
         toolUses: r.totalToolUseCount ?? null, durationMs: r.totalDurationMs ?? null, t
       }]);
     }
-    case "SubagentStart":
-      return keep([{ type: "task_start", taskId: p.agent_id, agent: p.agent_type ?? "general-purpose", description: "", prompt: "", t }]);
+    case "SubagentStart": {
+      // Un agente ya en marcha no se abre dos veces (hook repetido).
+      if (session.agents?.[p.agent_id]) return keep([]);
+      return keep(
+        [{ type: "task_start", taskId: p.agent_id, agent: p.agent_type ?? "general-purpose", description: "", prompt: "", model: ctx.agentModel ?? null, t }],
+        { agents: { ...(session.agents ?? {}), [p.agent_id]: { denied: false } } }
+      );
+    }
     case "SubagentStop": {
+      // Claude Code también lanza SubagentStop para sus agentes internos (resúmenes de progreso) y puede repetirlo:
+      // solo cierra un encargo que arrancó y sigue abierto. Sesiones sin registro de agentes (anteriores) pasan como antes.
+      if (session.agents && !session.agents[p.agent_id]) return keep([]);
+      const sum = ctx.agentSummary ?? {};
+      const denied = session.agents?.[p.agent_id]?.denied === true;
+      const failedByPermission = denied && (sum.status ?? "completed") === "completed";
+      const status = failedByPermission ? "failed" : sum.status ?? "completed";
+      const error = failedByPermission ? "permission" : sum.error ?? null;
       // Lectura completa del transcript: sustituye a las instantáneas en vivo. El estado incremental ya no hace falta.
       const res = keep([
         ...usageEvents("task_usage", ctx.agentUsage, t, { taskId: p.agent_id, snapshot: true }),
         {
-          type: "task_end", taskId: p.agent_id, status: "completed", summary: short(p.last_assistant_message, 200),
-          result: short(p.last_assistant_message, RESULT_MAX), tokens: null, toolUses: null, durationMs: null, t
+          type: "task_end", taskId: p.agent_id, status, ...(error ? { error } : {}), model: sum.model ?? null,
+          summary: short(p.last_assistant_message, 200), result: short(p.last_assistant_message, RESULT_MAX),
+          tokens: sum.tokens ?? null, toolUses: sum.toolUses ?? null, durationMs: sum.durationMs ?? null, t
         }
       ]);
+      if (res.session.agents) {
+        const rest = { ...res.session.agents };
+        delete rest[p.agent_id];
+        res.session = { ...res.session, agents: rest };
+      }
       if (res.session.agentUsage && p.agent_id in res.session.agentUsage) {
         const rest = { ...res.session.agentUsage };
         delete rest[p.agent_id];
@@ -196,8 +231,11 @@ export function translateHook(p, session, now, makeRunId, ctx = {}) {
       }
       return res;
     }
-    case "PermissionDenied":
-      return keep([{ type: "error", kind: "permission", message: `${p.tool_name ?? "Herramienta"} denegado`, t }]);
+    case "PermissionDenied": {
+      const ev = [{ type: "error", kind: "permission", message: `${p.tool_name ?? "Herramienta"} denegado`, t }];
+      const mine = p.agent_id ? session.agents?.[p.agent_id] : null;
+      return keep(ev, mine ? { agents: { ...session.agents, [p.agent_id]: { ...mine, denied: true } } } : null);
+    }
     case "Stop":
       if ((p.background_tasks ?? []).length > 0) return keep([{ type: "thinking", taskId: null, text: "", t }]);
       return close([{ type: "run_end", exitCode: 0, t }]);

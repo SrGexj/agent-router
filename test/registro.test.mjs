@@ -222,3 +222,24 @@ describe("reintentos y escaladas en task_request", () => {
     expect(run.pending).toEqual([]);
   });
 });
+
+describe("parser stream-json: idempotente y con el modelo real", () => {
+  const started = { type: "system", subtype: "task_started", task_id: "t1", tool_use_id: "tu1", subagent_type: "programador", description: "d" };
+  const notified = { type: "system", subtype: "task_notification", task_id: "t1", status: "completed", summary: "ok" };
+  const sub = { type: "assistant", parent_tool_use_id: "tu1", message: { model: "claude-haiku-5-5", content: [] } };
+
+  it("repetir task_started o task_notification no duplica eventos", async () => {
+    const { createParser } = await import("../src/core/parser.mjs");
+    const p = createParser();
+    const out = [started, started, notified, notified].flatMap((m) => p.push(m, 1));
+    expect(ofType(out, "task_start")).toHaveLength(1);
+    expect(ofType(out, "task_end")).toHaveLength(1);
+  });
+
+  it("task_end lleva el modelo visto en los mensajes del subagente", async () => {
+    const { createParser } = await import("../src/core/parser.mjs");
+    const p = createParser();
+    const out = [started, sub, notified].flatMap((m) => p.push(m, 1));
+    expect(ofType(out, "task_end")[0].model).toBe("claude-haiku-5-5");
+  });
+});

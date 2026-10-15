@@ -1,0 +1,27 @@
+node_modules/
+dashboard/dist/
+coverage/
+.DS_Store
+.impeccable/
+
+# Secretos y configuración local
+.env
+.env.*
+*.key
+
+# Logs y capturas de sesiones
+*.log
+*.jsonl
+!test/fixtures/*.jsonl
+.claude/
+
+# Modelos y pesos locales
+*.safetensors
+*.pt
+*.bin
+laya-venv/
+hf/
+
+# Capturas de pruebas E2E
+pruebas/capturas/
+!.env.example

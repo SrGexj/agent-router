@@ -1,0 +1,203 @@
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { mkdtemp, rm, readFile, writeFile, mkdir } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { parseLayaArgs, isLayaCommand, USAGE } from "../src/core/cli.mjs";
+import { loadConfig } from "../src/config.mjs";
+import { createStore } from "../src/core/store.mjs";
+import { createPlatform } from "../src/core/platform/index.mjs";
+import { layaDatos, layaEntrenar, layaUsar } from "../src/core/laya-tools.mjs";
+
+describe("parseLayaArgs", () => {
+  it("reconoce los subcomandos", () => {
+    expect(isLayaCommand("laya-datos")).toBe(true);
+    expect(isLayaCommand("arregla el bug")).toBe(false);
+    expect(USAGE).toMatch(/laya-datos/);
+  });
+  it("laya-datos: out y perfil", () => {
+    expect(parseLayaArgs(["laya-datos"])).toMatchObject({ command: "laya-datos", out: null, profile: "todos", force: false });
+    expect(parseLayaArgs(["laya-datos", "--out", "a.csv", "--perfil", "personal"])).toMatchObject({ out: "a.csv", profile: "personal" });
+    expect(() => parseLayaArgs(["laya-datos", "--perfil", "x y"])).toThrow(/perfil/);
+    expect(() => parseLayaArgs(["laya-datos", "--out"])).toThrow(/--out/);
+    expect(() => parseLayaArgs(["laya-datos", "--raro"])).toThrow(/--raro/);
+  });
+  it("laya-entrenar: forzar y simular", () => {
+    expect(parseLayaArgs(["laya-entrenar", "--forzar", "--simular"])).toMatchObject({ command: "laya-entrenar", force: true, dryRun: true });
+  });
+  it("laya-usar: carpeta o --quitar", () => {
+    expect(parseLayaArgs(["laya-usar", "/x/modelo"])).toMatchObject({ command: "laya-usar", dir: "/x/modelo", remove: false });
+    expect(parseLayaArgs(["laya-usar", "--quitar"])).toMatchObject({ remove: true });
+    expect(() => parseLayaArgs(["laya-usar"])).toThrow(/carpeta/);
+  });
+});
+
+let home;
+let config;
+let store;
+const logs = [];
+const log = (m) => logs.push(m);
+const NOW = Date.UTC(2026, 9, 15, 8, 30, 5);
+beforeEach(async () => {
+  home = await mkdtemp(join(tmpdir(), "router-laya-"));
+  config = loadConfig({ HOME: home, ROUTER_HOME: join(home, "r") });
+  store = createStore({ runsDir: config.runsDir });
+  logs.length = 0;
+});
+afterEach(async () => { await rm(home, { recursive: true, force: true }); });
+
+// n ejecuciones completadas; node = quién las lleva (opus = sin encargos).
+async function seed(prefix, n, node, profile = "trabajo") {
+  for (let i = 0; i < n; i++) {
+    const id = `2026${prefix}${String(i).padStart(3, "0")}-1-a`;
+    await store.append(id, { type: "run_start", runId: id, task: `Tarea ${prefix} número ${i}, con "comillas"`, mode: "orquestado", model: "opus", cwd: "/", profile, t: 1 });
+    if (node !== "opus") await store.append(id, { type: "task_start", taskId: "a", agent: node, description: "d", prompt: "p", t: 2 });
+    await store.append(id, { type: "run_end", exitCode: 0, t: 3 });
+  }
+}
+
+describe("laya-datos", () => {
+  it("escribe el CSV de entrenamiento y el de evaluación, y avisa de las clases escasas", async () => {
+    await seed("a", 40, "asistente");
+    await seed("p", 40, "programador");
+    await seed("o", 5, "opus");
+    const out = join(home, "datos.csv");
+    const res = await layaDatos({ store, opts: { out, profile: "todos" }, log });
+    expect(res.dist).toEqual({ asistente: 40, programador: 40, opus: 5 });
+    const train = await readFile(out, "utf8");
+    const ev = await readFile(join(home, "datos-eval.csv"), "utf8");
+    expect(train.split("\n")[0]).toBe("texto,etiqueta,perfil,fuente,runId");
+    const lines = (s) => s.trim().split("\n").length - 1;
+    expect(lines(train) + lines(ev)).toBe(85);
+    expect(lines(ev)).toBeGreaterThan(5);
+    expect(train).toContain('"Tarea a número');
+    const text = logs.join("\n");
+    expect(text).toMatch(/asistente\D+40/);
+    expect(text).toMatch(/opus.*menos de 15/s);
+  });
+  it("sin --out usa laya-datos.csv en el directorio dado", async () => {
+    await seed("a", 3, "asistente");
+    const res = await layaDatos({ store, opts: { out: null, profile: "todos" }, cwd: home, log });
+    expect(res.trainPath).toBe(join(home, "laya-datos.csv"));
+  });
+});
+
+describe("laya-entrenar", () => {
+  // exec falso: no ejecuta nada real; el "script de evaluación" escribe predicciones (todas "programador" para la base, perfectas para el nuevo).
+  function fakeExec(calls) {
+    return async (cmd, args) => {
+      calls.push({ cmd, args });
+      if (cmd.endsWith("laya-train")) return { code: 0 };
+      const [, data, model, outFile] = [args[0], args[1], args[2], args[3]];
+      const rows = (await readFile(data, "utf8")).trim().split("\n").map((l) => JSON.parse(l));
+      const preds = rows.map((r) => (model === "multilingual" ? "programador" : r.expected.route));
+      await writeFile(outFile, JSON.stringify(preds));
+      return { code: 0 };
+    };
+  }
+  const opts = { force: false, dryRun: false, profile: "todos" };
+
+  it("se niega con pocos ejemplos o clases escasas, sin lanzar nada", async () => {
+    await seed("a", 10, "asistente");
+    const calls = [];
+    const res = await layaEntrenar({ store, config, exec: fakeExec(calls), now: NOW, opts, log });
+    expect(res.refused).toBe(true);
+    expect(calls).toEqual([]);
+    expect(logs.join("\n")).toMatch(/--forzar/);
+  });
+
+  it("entrena, evalúa base y nuevo, y propone cambiar solo si el nuevo gana", async () => {
+    await seed("a", 30, "asistente");
+    await seed("p", 30, "programador");
+    await seed("o", 30, "opus");
+    const calls = [];
+    const res = await layaEntrenar({ store, config, exec: fakeExec(calls), now: NOW, opts, log });
+    expect(res.refused).toBeFalsy();
+    expect(res.outDir).toBe(join(config.laya.modelsDir, "20261015-083005"));
+    const train = calls.find((c) => c.cmd.endsWith("laya-train"));
+    expect(train.cmd).toBe(join(config.laya.venvDir, "bin/laya-train"));
+    expect(train.args).toEqual(expect.arrayContaining(["--base", "multilingual", "--out", join(res.outDir, "modelo")]));
+    expect(train.args[train.args.indexOf("--data") + 1]).toMatch(/train\.jsonl$/);
+    const evals = calls.filter((c) => c.cmd.endsWith("python"));
+    expect(evals).toHaveLength(2);
+    expect(res.base.accuracy).toBeLessThan(0.5);
+    expect(res.nuevo.accuracy).toBe(1);
+    expect(res.winner).toBe("nuevo");
+    const text = logs.join("\n");
+    expect(text).toMatch(/laya-usar/);
+    expect(text).toContain(join(res.outDir, "modelo"));
+    await expect(readFile(config.laya.activeFile, "utf8")).rejects.toThrow(); // no cambia nada solo
+  });
+
+  it("si el base gana no propone el cambio", async () => {
+    await seed("a", 30, "asistente");
+    await seed("p", 30, "programador");
+    await seed("o", 30, "opus");
+    const exec = async (cmd, args) => {
+      if (cmd.endsWith("laya-train")) return { code: 0 };
+      const rows = (await readFile(args[1], "utf8")).trim().split("\n").map((l) => JSON.parse(l));
+      await writeFile(args[3], JSON.stringify(rows.map((r) => (args[2] === "multilingual" ? r.expected.route : "programador"))));
+      return { code: 0 };
+    };
+    const res = await layaEntrenar({ store, config, exec, now: NOW, opts, log });
+    expect(res.winner).toBe("base");
+    expect(logs.join("\n")).not.toMatch(/router laya-usar/);
+  });
+
+  it("--forzar salta el mínimo y --simular solo hace dry-run", async () => {
+    await seed("a", 6, "asistente");
+    await seed("p", 6, "programador");
+    const calls = [];
+    const res = await layaEntrenar({ store, config, exec: fakeExec(calls), now: NOW, opts: { ...opts, force: true, dryRun: true }, log });
+    expect(res.refused).toBeFalsy();
+    expect(calls).toHaveLength(1);
+    expect(calls[0].args).toContain("--dry-run");
+  });
+
+  it("si laya-train falla lo cuenta y no evalúa", async () => {
+    await seed("a", 6, "asistente");
+    const calls = [];
+    const exec = async (cmd, args) => { calls.push(cmd); return { code: 1, args }; };
+    const res = await layaEntrenar({ store, config, exec, now: NOW, opts: { ...opts, force: true }, log });
+    expect(res.failed).toBe(true);
+    expect(calls).toHaveLength(1);
+  });
+});
+
+describe("laya-usar", () => {
+  it("anota el checkpoint elegido y explica cómo aplicarlo, sin tocar servicios", async () => {
+    const dir = join(home, "modelo");
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, "rl_agent_config.json"), "{}");
+    const res = await layaUsar({ config, opts: { dir, remove: false }, log, platform: createPlatform("darwin", { home, uid: 501 }) });
+    expect(res.ok).toBe(true);
+    expect((await readFile(config.laya.activeFile, "utf8")).trim()).toBe(dir);
+    const text = logs.join("\n");
+    expect(text).toContain("LAYA_EXTRA_MODELS");
+    expect(text).toContain(JSON.stringify({ multilingual: dir }));
+    expect(text).toMatch(/launchctl kickstart -k gui\/\$\(id -u\)\/com\.agent-router\.laya/);
+    expect(text).toContain("LaunchAgent");
+  });
+  it("en Linux explica el reinicio con systemctl --user", async () => {
+    const dir = join(home, "modelo");
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, "rl_agent_config.json"), "{}");
+    await layaUsar({ config, opts: { dir, remove: false }, log, platform: createPlatform("linux", { home, shell: "/bin/bash" }) });
+    const text = logs.join("\n");
+    expect(text).toMatch(/systemctl --user restart com\.agent-router\.laya\.service/);
+    expect(text).not.toMatch(/launchctl/);
+  });
+  it("rechaza una carpeta que no es un checkpoint", async () => {
+    const dir = join(home, "vacia");
+    await mkdir(dir, { recursive: true });
+    const res = await layaUsar({ config, opts: { dir, remove: false }, log });
+    expect(res.ok).toBe(false);
+    await expect(readFile(config.laya.activeFile, "utf8")).rejects.toThrow();
+  });
+  it("--quitar borra la elección", async () => {
+    await mkdir(config.home, { recursive: true });
+    await writeFile(config.laya.activeFile, "/x\n");
+    const res = await layaUsar({ config, opts: { dir: null, remove: true }, log });
+    expect(res.ok).toBe(true);
+    await expect(readFile(config.laya.activeFile, "utf8")).rejects.toThrow();
+  });
+});

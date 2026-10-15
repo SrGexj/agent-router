@@ -1,0 +1,12 @@
+{
+  "model": "jev-1.13.0",
+  "answers": {
+    "route": {
+      "type": "choice",
+      "choice": "asistente",
+      "confidence": 0.97,
+      "probabilities": { "asistente": 0.97, "programador": 0.03, "opus": 0.0 }
+    }
+  },
+  "usage": { "input_tokens": 312, "output_tokens": 34 }
+}

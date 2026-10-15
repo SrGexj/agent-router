@@ -1,0 +1,13 @@
+import { defineConfig } from "vitest/config";
+
+export default defineConfig({
+  test: {
+    include: ["test/**/*.test.mjs"],
+    coverage: {
+      provider: "v8",
+      reporter: ["text", "html", "lcov"],
+      include: ["src/**", "server/app.mjs", "dashboard/src/**/*.js"],
+      reportsDirectory: "coverage"
+    }
+  }
+});

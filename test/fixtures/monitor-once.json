@@ -1,0 +1,114 @@
+{
+  "schema_version": "1.0",
+  "generated_at": "2026-10-15T06:58:08.167456+00:00",
+  "tool": {
+    "name": "claude-monitor",
+    "version": "4.0.0"
+  },
+  "source": {
+    "kind": "claude_code_jsonl",
+    "account": null,
+    "data_paths": [
+      "/home/usuario/.claude/projects"
+    ]
+  },
+  "confidence": "local_estimate",
+  "stale": false,
+  "plan": "custom",
+  "plan_info": {
+    "name": "custom",
+    "display_name": "Custom",
+    "confidence": "local_estimate",
+    "unverified": false,
+    "guidance": null
+  },
+  "limits": {
+    "five_hour": {
+      "used_percentage": 26.4,
+      "tokens_used": 104141,
+      "token_limit": 394223,
+      "resets_at": "2026-10-15T08:00:00+00:00",
+      "resets_at_epoch": 1792051200,
+      "source": {
+        "kind": "claude_code_jsonl"
+      },
+      "confidence": "local_estimate"
+    },
+    "seven_day": {
+      "used_percentage": null,
+      "tokens_used": null,
+      "token_limit": null,
+      "resets_at": null,
+      "resets_at_epoch": null,
+      "source": {
+        "kind": "claude_code_jsonl"
+      },
+      "confidence": "unknown"
+    }
+  },
+  "local": {
+    "is_active": true,
+    "session_start": "2026-10-15T03:00:00+00:00",
+    "session_end": "2026-10-15T08:00:00+00:00",
+    "tokens": {
+      "input_tokens": 252,
+      "output_tokens": 103889,
+      "cache_creation_input_tokens": 1499659,
+      "cache_read_input_tokens": 27674187,
+      "total_tokens": 29277987
+    },
+    "cost_usd": 73.53342199999999,
+    "sent_messages": 122,
+    "burn_rate_tokens_per_minute": 123057.56446956078,
+    "burn_rate_cost_per_hour": 18.543987641839756,
+    "model_distribution": [
+      {
+        "family": "opus",
+        "percentage": 99.4,
+        "input_tokens": 208,
+        "output_tokens": 103343,
+        "cost_usd": 72.5604
+      },
+      {
+        "family": "sonnet",
+        "percentage": 0.6,
+        "input_tokens": 44,
+        "output_tokens": 546,
+        "cost_usd": 0.973
+      }
+    ]
+  },
+  "local_history": {
+    "label": "local_history",
+    "total_tokens": 1046330984,
+    "total_cost_usd": 1885.5169,
+    "source": {
+      "kind": "claude_code_jsonl"
+    },
+    "confidence": "local_estimate"
+  },
+  "pace": {
+    "label": "speed up",
+    "used_percentage": 26.4,
+    "elapsed_percentage": 79.4,
+    "resets_at": "2026-10-15T08:00:00+00:00",
+    "resets_at_epoch": 1792051200,
+    "source": {
+      "kind": "claude_code_jsonl"
+    },
+    "confidence": "local_estimate"
+  },
+  "forecast": {
+    "predicted_tokens_exhausted_at": "2026-10-15T18:00:50.167456+00:00",
+    "predicted_tokens_exhausted_epoch": 1792087250,
+    "tokens_remaining": 290082,
+    "minutes_remaining": 662.7,
+    "basis": "input_output_tokens_per_minute",
+    "confidence": "local_estimate",
+    "display": "Today 18:00 (estimated)"
+  },
+  "status": {
+    "code": 0,
+    "label": "ok"
+  }
+}

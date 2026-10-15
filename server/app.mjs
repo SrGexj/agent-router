@@ -7,6 +7,7 @@ import { mkdir, open, readdir } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { reduceEvents } from "../src/core/reducer.mjs";
+import { CONTEXT_WARN_TOKENS } from "../src/core/compaction.mjs";
 import { parseJsonl } from "../src/core/store.mjs";
 import { accessMiddleware, decideAccess, LOCAL_HOST } from "./acceso.mjs";
 
@@ -57,7 +58,7 @@ const sameOriginGuard = (accessToken) => (req, res, next) => {
   next();
 };
 
-export function createApp({ store, monitor = null, profileLabels = {}, now = Date.now, accessToken = null }) {
+export function createApp({ store, monitor = null, profileLabels = {}, settings = {}, now = Date.now, accessToken = null }) {
   const app = express();
   if (accessToken) app.use(accessMiddleware(accessToken));
   app.get("/health", (_req, res) => res.json({ ok: true }));
@@ -87,6 +88,9 @@ export function createApp({ store, monitor = null, profileLabels = {}, now = Dat
   // Etiquetas de los perfiles de cuenta (id → texto), definidas en la configuración del servidor.
   app.get("/api/profiles", (_req, res) => res.json({ labels: profileLabels }));
 
+  // Ajustes que el dashboard necesita de la configuración del servidor.
+  app.get("/api/settings", (_req, res) => res.json({ contextWarnTokens: settings.contextWarnTokens ?? CONTEXT_WARN_TOKENS }));
+
   app.get("/api/quota", async (_req, res) => {
     res.json({ quotas: await store.latestQuotas() });
   });
@@ -108,9 +112,9 @@ export function createApp({ store, monitor = null, profileLabels = {}, now = Dat
   return app;
 }
 
-export async function startServer({ store, host, port, monitor = null, profileLabels = {}, now = Date.now, accessToken = null }) {
+export async function startServer({ store, host, port, monitor = null, profileLabels = {}, settings = {}, now = Date.now, accessToken = null }) {
   await mkdir(store.runsDir, { recursive: true });
-  const app = createApp({ store, monitor, profileLabels, now, accessToken });
+  const app = createApp({ store, monitor, profileLabels, settings, now, accessToken });
   const server = createServer(app);
   const wss = new WebSocketServer({ noServer: true });
   // El upgrade no pasa por Express: se aplica aquí la misma comprobación (cookie o acceso local).

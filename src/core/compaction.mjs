@@ -43,6 +43,17 @@ export function contextState(ctx) {
 // Estado del contexto de una ejecución (run.context lo escribe la statusline); null si aún no hay datos.
 export const runContext = (run) => (run?.context ? contextState({ ...run.context, limit: CO_AUTOCOMPACT_WINDOW }) : null);
 
+// Umbral por defecto del aviso de contexto del orquestador (tokens); se configura en config.mjs.
+export const CONTEXT_WARN_TOKENS = 120_000;
+
+// Contexto actual de la ejecución frente al umbral configurable. `over` solo vale en una ejecución en curso.
+// null si la ejecución no tiene datos de contexto (ejecuciones antiguas) o el umbral no es válido.
+export function contextWatch(run, warnTokens) {
+  const tokens = run?.context?.tokens;
+  if (!(tokens > 0) || !(warnTokens > 0)) return null;
+  return { tokens, warnTokens, over: run.status === "running" && tokens >= warnTokens, pct: Math.floor((tokens / warnTokens) * 100) };
+}
+
 // Sin eventos durante este tiempo y sin encargos en curso, la ejecución se considera ociosa.
 export const BUSY_MS = 30_000;
 export const CONTEXT_HELP = "Tarea cerrada y memoria al día → /clear. A mitad de tarea → deja que compacte.";

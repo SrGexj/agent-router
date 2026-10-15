@@ -243,3 +243,23 @@ describe("parser stream-json: idempotente y con el modelo real", () => {
     expect(ofType(out, "task_end")[0].model).toBe("claude-haiku-5-5");
   });
 });
+
+describe("compatibilidad con ejecuciones antiguas", () => {
+  it("una ejecución sin attempt, error, model ni context sigue reduciéndose y las vistas no fallan", async () => {
+    const { contextWatch, runContext } = await import("../src/core/compaction.mjs");
+    const { taskRows, costBreakdown } = await import("../src/core/details.mjs");
+    const run = reduceEvents([
+      { type: "run_start", runId: "r", task: "x", mode: "sesion", model: "opus", t: 1 },
+      { type: "task_request", agent: "asistente", description: "d", prompt: "p", t: 2 },
+      { type: "task_start", taskId: "a", agent: "asistente", description: "", prompt: "", t: 3 },
+      { type: "task_end", taskId: "a", status: "completed", summary: "ok", tokens: null, toolUses: null, durationMs: null, t: 4 },
+      { type: "run_end", exitCode: 0, t: 5 }
+    ]);
+    expect(run.tasks.a).toMatchObject({ status: "completed", description: "d", error: null });
+    expect(run.tasks.a.attempt).toBeUndefined();
+    expect(contextWatch(run, 120_000)).toBeNull();
+    expect(runContext(run)).toBeNull();
+    expect(() => taskRows(run)).not.toThrow();
+    expect(() => costBreakdown(run)).not.toThrow();
+  });
+});

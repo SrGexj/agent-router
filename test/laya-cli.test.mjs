@@ -24,6 +24,15 @@ describe("parseLayaArgs", () => {
   it("laya-entrenar: forzar y simular", () => {
     expect(parseLayaArgs(["laya-entrenar", "--forzar", "--simular"])).toMatchObject({ command: "laya-entrenar", force: true, dryRun: true });
   });
+  it("laya-entrenar: --datos y parámetros de memoria, con valores seguros por defecto", () => {
+    expect(parseLayaArgs(["laya-entrenar"])).toMatchObject({ datos: null, microBatch: 1, gradAccum: 64, maxLen: 512 });
+    expect(parseLayaArgs(["laya-entrenar", "--datos", "/d", "--micro-batch", "2", "--grad-accum", "32", "--max-len", "256"]))
+      .toMatchObject({ datos: "/d", microBatch: 2, gradAccum: 32, maxLen: 256 });
+    expect(() => parseLayaArgs(["laya-entrenar", "--micro-batch", "0"])).toThrow(/--micro-batch/);
+    expect(() => parseLayaArgs(["laya-entrenar", "--max-len", "abc"])).toThrow(/--max-len/);
+    expect(() => parseLayaArgs(["laya-entrenar", "--datos"])).toThrow(/--datos/);
+    expect(() => parseLayaArgs(["laya-datos", "--datos", "/d"])).toThrow(/--datos/);
+  });
   it("laya-usar: carpeta o --quitar", () => {
     expect(parseLayaArgs(["laya-usar", "/x/modelo"])).toMatchObject({ command: "laya-usar", dir: "/x/modelo", remove: false });
     expect(parseLayaArgs(["laya-usar", "--quitar"])).toMatchObject({ remove: true });
@@ -94,7 +103,7 @@ describe("laya-entrenar", () => {
       return { code: 0 };
     };
   }
-  const opts = { force: false, dryRun: false, profile: "todos" };
+  const opts = { force: false, dryRun: false, profile: "todos", datos: null, microBatch: 1, gradAccum: 64, maxLen: 512 };
 
   it("se niega con pocos ejemplos o clases escasas, sin lanzar nada", async () => {
     await seed("a", 10, "asistente");
@@ -151,6 +160,37 @@ describe("laya-entrenar", () => {
     expect(res.refused).toBeFalsy();
     expect(calls).toHaveLength(1);
     expect(calls[0].args).toContain("--dry-run");
+  });
+
+  it("pasa a laya-train micro-batch, grad-accum y max-len", async () => {
+    await seed("a", 6, "asistente");
+    const calls = [];
+    await layaEntrenar({ store, config, exec: fakeExec(calls), now: NOW, opts: { ...opts, force: true, dryRun: true, microBatch: 2, gradAccum: 32, maxLen: 256 }, log });
+    const a = calls[0].args;
+    expect(a.slice(a.indexOf("--micro-batch"), a.indexOf("--micro-batch") + 2)).toEqual(["--micro-batch", "2"]);
+    expect(a[a.indexOf("--grad-accum") + 1]).toBe("32");
+    expect(a[a.indexOf("--max-len") + 1]).toBe("256");
+  });
+
+  it("--datos usa train.jsonl y test.jsonl externos sin leer el store", async () => {
+    const ds = join(home, "ds");
+    await mkdir(ds, { recursive: true });
+    const row = (label, i) => JSON.stringify({ state: { body: `t${i}` }, questions: { route: {} }, expected: { route: label } });
+    await writeFile(join(ds, "train.jsonl"), ["asistente", "programador", "opus"].map(row).join("\n") + "\n");
+    await writeFile(join(ds, "test.jsonl"), ["asistente", "programador", "opus", "opus"].map(row).join("\n") + "\n");
+    const calls = [];
+    const res = await layaEntrenar({ store, config, exec: fakeExec(calls), now: NOW, opts: { ...opts, datos: ds }, log });
+    expect(res.refused).toBeFalsy();
+    const train = calls.find((c) => c.cmd.endsWith("laya-train"));
+    expect(train.args[train.args.indexOf("--data") + 1]).toBe(join(ds, "train.jsonl"));
+    const evals = calls.filter((c) => c.cmd.endsWith("python"));
+    expect(evals.map((c) => c.args[1])).toEqual([join(ds, "test.jsonl"), join(ds, "test.jsonl")]);
+    expect(res.nuevo.n).toBe(4);
+    expect(res.nuevo.accuracy).toBe(1);
+  });
+
+  it("--datos sin train.jsonl falla con un mensaje claro", async () => {
+    await expect(layaEntrenar({ store, config, exec: fakeExec([]), now: NOW, opts: { ...opts, datos: join(home, "nada") }, log })).rejects.toThrow(/train\.jsonl/);
   });
 
   it("si laya-train falla lo cuenta y no evalúa", async () => {

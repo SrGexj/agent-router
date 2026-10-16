@@ -7,7 +7,7 @@ import { reduceEvents } from "./reducer.mjs";
 import { CHOICES } from "./classifier.mjs";
 import { defaultPlatform } from "./platform/index.mjs";
 import {
-  trainingRows, toCsv, toJsonl, splitRows, distribution, classWarnings, checkMinimum, scoreEval, compareScores, layaTrainArgs,
+  trainingRows, toCsv, toJsonl, splitRows, distribution, classWarnings, checkMinimum, scoreEval, compareScores, layaTrainArgs, rowsFromJsonl,
   DEFAULT_EVAL_RATIO, MIN_PER_CLASS
 } from "./laya-data.mjs";
 
@@ -69,7 +69,19 @@ function printScores(log, base, nuevo) {
   log(`  ${"global".padEnd(12)} ${pct(base.accuracy).padStart(8)} ${pct(nuevo.accuracy).padStart(8)}`);
 }
 
-export async function layaEntrenar({ store, config, exec, now, opts, log = console.log }) {
+// Datos de entrada: o las ejecuciones etiquetadas del store, o train.jsonl/test.jsonl de una carpeta (--datos).
+async function prepareData({ store, opts, dataDir, log }) {
+  if (opts.datos) {
+    const dir = resolve(opts.datos);
+    const trainJsonl = join(dir, "train.jsonl");
+    const evalJsonl = join(dir, "test.jsonl");
+    const read = (p) => readFile(p, "utf8").catch(() => { throw new Error(`falta ${p} (--datos espera train.jsonl y test.jsonl)`); });
+    const train = rowsFromJsonl(await read(trainJsonl));
+    const ev = rowsFromJsonl(await read(evalJsonl));
+    describeDist(distribution([...train, ...ev]), [...train, ...ev], log);
+    log(`Datos externos en ${dir} (${train.length} para entrenar, ${ev.length} para evaluar)`);
+    return { trainJsonl, evalJsonl, train, ev, dist: distribution(train) };
+  }
   const rows = trainingRows(await loadRuns(store), { profile: opts.profile });
   const dist = distribution(rows);
   describeDist(dist, rows, log);
@@ -80,10 +92,6 @@ export async function layaEntrenar({ store, config, exec, now, opts, log = conso
     return { refused: true, dist };
   }
   if (!min.ok) log(`Aviso (--forzar): ${min.reasons.join("; ")}.`);
-
-  const outDir = join(config.laya.modelsDir, stamp(now));
-  const dataDir = join(outDir, "datos");
-  const modelDir = join(outDir, "modelo");
   const { train, eval: ev } = await writeSplit(rows, join(dataDir, "train.csv"), join(dataDir, "eval.csv"), DEFAULT_EVAL_RATIO);
   // Para entrenar y evaluar se usa JSONL con el mismo estado y preguntas que el servicio (el CSV de laya-train sintetiza otra pregunta).
   const trainJsonl = join(dataDir, "train.jsonl");
@@ -91,9 +99,20 @@ export async function layaEntrenar({ store, config, exec, now, opts, log = conso
   await writeFile(trainJsonl, toJsonl(train));
   await writeFile(evalJsonl, toJsonl(ev));
   log(`Datos en ${dataDir} (${train.length} para entrenar, ${ev.length} para evaluar)`);
+  return { trainJsonl, evalJsonl, train, ev, dist };
+}
+
+export async function layaEntrenar({ store, config, exec, now, opts, log = console.log }) {
+  const outDir = join(config.laya.modelsDir, stamp(now));
+  const dataDir = join(outDir, "datos");
+  const modelDir = join(outDir, "modelo");
+  const data = await prepareData({ store, opts, dataDir, log });
+  if (data.refused) return { refused: true, dist: data.dist };
+  const { trainJsonl, evalJsonl, ev, dist } = data;
+  await mkdir(dataDir, { recursive: true });
 
   log("Ejecutando laya-train…");
-  const trainRes = await exec(join(config.laya.venvDir, "bin/laya-train"), layaTrainArgs({ data: trainJsonl, out: modelDir, base: config.laya.base, dryRun: opts.dryRun }), { env: layaEnv(config) });
+  const trainRes = await exec(join(config.laya.venvDir, "bin/laya-train"), layaTrainArgs({ data: trainJsonl, out: modelDir, base: config.laya.base, dryRun: opts.dryRun, microBatch: opts.microBatch, gradAccum: opts.gradAccum, maxLen: opts.maxLen }), { env: layaEnv(config) });
   if (trainRes.code !== 0) {
     log(`laya-train falló (código ${trainRes.code}).`);
     return { failed: true, outDir, dist };

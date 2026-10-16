@@ -25,7 +25,6 @@ const Icon = ({ name }) => <svg viewBox="0 0 24 24" aria-hidden="true">{ICONS[na
 
 function ActiveRuns({ active, onSelect }) {
   const labelOf = useProfileLabel();
-  if (active.length === 0) return null;
   return (
     <div className="active-runs" role="group" aria-label="Ejecuciones en curso">
       {active.map((p) => {
@@ -116,14 +115,17 @@ export default function App() {
     <main className="page">
       <section className="card">
         <div className="card-top">
-          <AlertControls prefs={alertPrefs} denied={notifDenied} onToggleSound={() => updatePrefs({ sound: !alertPrefs.sound })} onToggleNotifications={toggleNotifications} />
-          <ThemeToggle />
-          <div className="seg-ctl" role="group" aria-label="Vista">
-            <button className={view === "auto" ? "on" : ""} onClick={() => setView("auto")}>En vivo</button>
-            <button className={view === "demo" ? "on" : ""} onClick={() => setView("demo")}>Demo</button>
+          <ActiveRuns active={snap.active} onSelect={setView} />
+          <div className="top-controls">
+            {mode === "historial" && <span className="hist-chip">Historial</span>}
+            <AlertControls prefs={alertPrefs} denied={notifDenied} onToggleSound={() => updatePrefs({ sound: !alertPrefs.sound })} onToggleNotifications={toggleNotifications} />
+            <ThemeToggle />
+            <div className="seg-ctl" role="group" aria-label="Vista">
+              <button className={view !== "demo" ? "on" : ""} aria-pressed={view !== "demo"} onClick={() => setView("auto")}>En vivo</button>
+              <button className={view === "demo" ? "on" : ""} aria-pressed={view === "demo"} onClick={() => setView("demo")}>Demo</button>
+            </div>
           </div>
         </div>
-        <ActiveRuns active={snap.active} onSelect={setView} />
         <Scene run={run} phase={snap.phase} now={snap.now} packets={snap.packets} />
         <Timeline
           fills={snap.fills} current={snap.current} errorAt={snap.errorAt}

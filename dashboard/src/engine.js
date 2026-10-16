@@ -1,7 +1,7 @@
 // Motor de animación: decide qué se ve (en espera, en vivo, historial o demo a petición), lleva el reloj de la
 // demo, la pausa y los paquetes en vuelo. Se avanza fuera del render (requestAnimationFrame)
 // y devuelve una instantánea inmutable. Los relojes entran como parámetros.
-import { reduceRun } from "../../src/core/reducer.mjs";
+import { reduceRun, markLostTasks } from "../../src/core/reducer.mjs";
 import { derivePhase, isActive, PHASES } from "../../src/core/view.mjs";
 import { isWaiting } from "../../src/core/details.mjs";
 import { packetsFor } from "./packets.js";
@@ -92,6 +92,7 @@ export function createEngine({ demoEvents, demoLength }) {
       run = advanceDemo(now);
     } else {
       now = wall;
+      run = markLostTasks(run, wall); // encargos sin señal: no cuentan como trabajando
     }
 
     const key = mode === "demo" ? "demo" : run?.id ?? mode;

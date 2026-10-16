@@ -1,9 +1,9 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { boxFaces, isoCircle, iso, bezierPoint, bezierPath, easeInOut, shadowLink, LAYA } from "./geometry.js";
 import { workerView } from "../../../src/core/view.mjs";
 import { spendShare, tokenShare, isWaiting } from "../../../src/core/details.mjs";
 import { runContext, runBusy, contextAdvice } from "../../../src/core/compaction.mjs";
-import { fmtDuration, usageTitle, layaNode, orchestratorSub, ownSubagentsLine, spendPending, workerSub } from "../captions.js";
+import { fmtDuration,layaNode, orchestratorSub, ownSubagentsLine, spendPending, workerSub, readSplitMode, saveSplitMode, splitView } from "../captions.js";
 
 export const VB = { w: 960, h: 548 };
 
@@ -174,6 +174,8 @@ function packetPoint(pk, now) {
 export default function Scene({ run, phase, now, packets }) {
   // En ventanas estrechas la escena se desplaza: empieza centrada en el orquestador.
   const scroller = useRef(null);
+  const [splitMode, setSplitMode] = useState(() => readSplitMode(typeof localStorage === "undefined" ? null : localStorage));
+  const pickSplit = (m) => { setSplitMode(m); try { saveSplitMode(localStorage, m); } catch { /* sin almacenamiento */ } };
   useEffect(() => {
     const el = scroller.current;
     if (el) el.scrollLeft = (el.scrollWidth - el.clientWidth) / 2;
@@ -183,6 +185,7 @@ export default function Scene({ run, phase, now, packets }) {
   const prog = workerView(run, "programador", now);
   const share = spendShare(run);
   const uso = tokenShare(run);
+  const view = splitView(splitMode, share, uso);
   const ctx = runContext(run);
   const advice = ctx ? contextAdvice(ctx.pct, runBusy(run, now)) : null;
   const manual = run?.mode === "manual";
@@ -258,33 +261,26 @@ export default function Scene({ run, phase, now, packets }) {
         <Label x={N.orq.x} y={N.orq.y + 76}><Pill dot={orqPill.dot}>{orqPill.text}</Pill></Label>
         {orqSub && <Label x={N.orq.x} y={N.orq.y + 98} className="sub orq-sub">{orqSub}</Label>}
         {ownLine && <Label x={N.orq.x} y={N.orq.y + (orqSub ? 118 : 98)} className="sub orq-own">{ownLine}</Label>}
-        <div className="split" style={{ left: pctX(N.orq.x), top: pctY(N.orq.y + 98 + (orqSub ? 22 : 0) + (ownLine ? 20 : 0)) }} title={share ? "Reparto del gasto real en dólares (precios API), orquestador incluido" : "Sin datos de uso todavía"}>
-          <div className="split-cap">gasto</div>
-          <div className="bar">
-            <span className="seg opus" style={{ width: `${share?.opus ?? 0}%` }} />
-            <span className="seg sonnet" style={{ width: `${share?.sonnet ?? 0}%` }} />
-            <span className="seg haiku" style={{ width: `${share?.haiku ?? 0}%` }} />
+        <div className="split" style={{ left: pctX(N.orq.x), top: pctY(N.orq.y + 98 + (orqSub ? 22 : 0) + (ownLine ? 20 : 0)) }}>
+          <div className="split-cap">
+            <button type="button" className={`split-tab${splitMode === "gasto" ? " on" : ""}`} aria-pressed={splitMode === "gasto"} onClick={() => pickSplit("gasto")}>gasto</button>
+            <span aria-hidden="true"> · </span>
+            <button type="button" className={`split-tab${splitMode === "uso" ? " on" : ""}`} aria-pressed={splitMode === "uso"} onClick={() => pickSplit("uso")}>uso</button>
           </div>
-          {spendNote ? <div className="split-pending">{spendNote}</div> : (
-            <div className="split-labels">
-              <span>Opus <b>{share ? `${share.opus}%` : "—"}</b></span>
-              <span>Sonnet <b>{share ? `${share.sonnet}%` : "—"}</b></span>
-              <span>Haiku <b>{share ? `${share.haiku}%` : "—"}</b></span>
-            </div>
-          )}
-          {uso && (
-            <div className="split-uso" title={usageTitle(uso)}>
-              <div className="split-cap">uso</div>
+          {!view.hidden && (
+            <div title={view.title}>
               <div className="bar">
-                <span className="seg opus" style={{ width: `${uso.opus}%` }} />
-                <span className="seg sonnet" style={{ width: `${uso.sonnet}%` }} />
-                <span className="seg haiku" style={{ width: `${uso.haiku}%` }} />
+                <span className="seg opus" style={{ width: `${view.bar?.opus ?? 0}%` }} />
+                <span className="seg sonnet" style={{ width: `${view.bar?.sonnet ?? 0}%` }} />
+                <span className="seg haiku" style={{ width: `${view.bar?.haiku ?? 0}%` }} />
               </div>
-              <div className="split-labels">
-                <span>Opus <b>{uso.opus}%</b></span>
-                <span>Sonnet <b>{uso.sonnet}%</b></span>
-                <span>Haiku <b>{uso.haiku}%</b></span>
-              </div>
+              {view.mode === "gasto" && spendNote ? <div className="split-pending">{spendNote}</div> : (
+                <div className="split-labels">
+                  <span>Opus <b>{view.bar ? `${view.bar.opus}%` : "—"}</b></span>
+                  <span>Sonnet <b>{view.bar ? `${view.bar.sonnet}%` : "—"}</b></span>
+                  <span>Haiku <b>{view.bar ? `${view.bar.haiku}%` : "—"}</b></span>
+                </div>
+              )}
             </div>
           )}
           {ctx && (

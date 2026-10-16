@@ -193,6 +193,32 @@ export function fmtTokenTypes(t) {
   return `entrada ${fmtTokens(t.input)} · salida ${fmtTokens(t.output)} · lectura de caché ${fmtTokens(t.cacheRead)} · escritura de caché ${fmtTokens(t.cacheWrite)}`;
 }
 
+// Barra de reparto única con selector GASTO · USO. Lógica pura (sin DOM) para poder probarla.
+export const SPLIT_KEY = "agent-router.split-mode";
+export const normalizeSplitMode = (v) => (v === "uso" ? "uso" : "gasto");
+
+export function readSplitMode(storage) {
+  try { return normalizeSplitMode(storage.getItem(SPLIT_KEY)); } catch { return "gasto"; }
+}
+
+export function saveSplitMode(storage, mode) {
+  try { storage.setItem(SPLIT_KEY, normalizeSplitMode(mode)); return true; } catch { return false; }
+}
+
+// Qué pintar según el modo: la barra (null = sin datos, se muestra "—"), su tooltip y si se oculta entera.
+export function splitView(mode, share, uso) {
+  if (normalizeSplitMode(mode) === "uso") {
+    if (!uso) return { mode: "uso", bar: null, title: "Sin datos de uso todavía", hidden: true };
+    return { mode: "uso", bar: { opus: uso.opus, sonnet: uso.sonnet, haiku: uso.haiku }, title: usageTitle(uso), hidden: false };
+  }
+  return {
+    mode: "gasto",
+    bar: share ?? null,
+    title: share ? "Reparto del gasto real en dólares (precios API), orquestador incluido" : "Sin datos de uso todavía",
+    hidden: false
+  };
+}
+
 // Tooltip de la barra de uso: tokens totales por modelo y, aparte, los nuevos (sin lectura de caché).
 export function usageTitle(uso) {
   const row = (label, k) => `${label} ${fmtTokens(uso.tokens[k])} (nuevos ${fmtTokens(uso.fresh[k])})`;

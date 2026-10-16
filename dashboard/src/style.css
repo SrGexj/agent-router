@@ -250,7 +250,6 @@ code { font-family: var(--mono); font-size: 0.92em; color: var(--strong); }
 .split .seg.opus { background: var(--seg-opus); }
 .split .seg.sonnet { background: var(--seg-sonnet); }
 .split .seg.haiku { background: var(--seg-haiku); }
-.split-uso { margin-top: 0.9em; }
 .split-labels { display: flex; justify-content: space-between; margin-top: 0.5em; font-size: max(9.5px, 1.22cqw); color: var(--muted); white-space: nowrap; gap: 8px; }
 .split-labels b { color: var(--text); font-weight: 600; }
 
@@ -514,3 +513,7 @@ code { font-family: var(--mono); font-size: 0.92em; color: var(--strong); }
 .ctxrow.warn .ctxwarn { background: var(--warn-bg); color: var(--warn); border: 1px solid var(--warn-line); }
 .ctxrow.critical .ctxwarn { background: var(--err-soft); color: var(--err-txt); border: 1px solid var(--err-line); }
 .ctxrow { margin-bottom: 12px; }
+.split-tab { all: unset; pointer-events: auto; cursor: pointer; color: var(--faint); opacity: 0.6; }
+.split-tab.on { color: var(--text); opacity: 1; }
+.split-tab:hover { opacity: 1; }
+.split-tab:focus-visible { outline: 1px solid var(--muted); outline-offset: 2px; border-radius: 2px; }

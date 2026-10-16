@@ -73,6 +73,22 @@ describe("translateHook: una sesión co a eventos del dashboard", () => {
     expect(session.runId).toBe("r-abcdef12-1");
   });
 
+  it("Stop con tareas en segundo plano pero ningun subagente en marcha cierra la ejecucion (sesion parada esperando al usuario)", () => {
+    const s0 = translateHook({ ...base, hook_event_name: "UserPromptSubmit", prompt: "x" }, { runId: null, seq: 0 }, T, makeRunId);
+    const res = translateHook({ ...base, hook_event_name: "Stop", background_tasks: [{ id: "shell" }] }, s0.session, T, makeRunId, { runningTasks: 0 });
+    expect(res.events.map((e) => e.type)).toEqual(["run_end"]);
+    expect(res.session.runId).toBeNull();
+    const run = reduceEvents([...s0.events, ...res.events]);
+    expect(run.status).toBe("completed");
+  });
+
+  it("Stop con tareas en segundo plano y algun subagente en marcha mantiene la ejecucion abierta", () => {
+    const s0 = translateHook({ ...base, hook_event_name: "UserPromptSubmit", prompt: "x" }, { runId: null, seq: 0 }, T, makeRunId);
+    const res = translateHook({ ...base, hook_event_name: "Stop", background_tasks: [{ id: "a" }] }, s0.session, T, makeRunId, { runningTasks: 1 });
+    expect(res.events.map((e) => e.type)).toEqual(["thinking"]);
+    expect(res.session.runId).toBe("r-abcdef12-1");
+  });
+
   it("StopFailure por límite cierra como limitada; otros errores como fallida", () => {
     const lim = play([{ hook_event_name: "UserPromptSubmit", prompt: "x" }, { hook_event_name: "StopFailure", error: "rate_limit" }]);
     expect(lim.events.slice(1)).toEqual([

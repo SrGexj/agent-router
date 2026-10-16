@@ -16,6 +16,8 @@ Opciones:
 Ajustar Laya con tus datos:
   router laya-datos [--out archivo.csv] [--perfil <id>|todos]   Exporta las ejecuciones etiquetadas (y un CSV de evaluación aparte).
   router laya-entrenar [--perfil P] [--forzar] [--simular]                  Exporta, ajusta Laya con laya-train y compara con el modelo base.
+      [--datos CARPETA]   usa CARPETA/train.jsonl y test.jsonl en vez de las ejecuciones guardadas
+      [--micro-batch N] [--grad-accum N] [--max-len N]   memoria (por defecto 1, 64 y 512)
   router laya-usar CARPETA | --quitar                                       Anota qué checkpoint usar y explica cómo aplicarlo.`;
 
 const LAYA_COMMANDS = new Set(["laya-datos", "laya-entrenar", "laya-usar"]);
@@ -25,7 +27,12 @@ export const isLayaCommand = (word) => LAYA_COMMANDS.has(word);
 export function parseLayaArgs(argv) {
   const [command, ...rest] = argv;
   if (!LAYA_COMMANDS.has(command)) throw new Error(`Subcomando no válido: ${command ?? "(vacío)"}.`);
-  const out = { command, out: null, profile: "todos", force: false, dryRun: false, dir: null, remove: false };
+  const out = { command, out: null, profile: "todos", force: false, dryRun: false, dir: null, remove: false, datos: null, microBatch: 1, gradAccum: 64, maxLen: 512 };
+  const posInt = (flag, i) => {
+    const v = value(flag, i);
+    if (!/^[1-9]\d*$/.test(v)) throw new Error(`Valor de ${flag} no válido: ${v} (entero positivo).`);
+    return Number(v);
+  };
   const value = (flag, i) => {
     const v = rest[i];
     if (v == null || v.startsWith("--")) throw new Error(`Falta el valor de ${flag}.`);
@@ -39,6 +46,10 @@ export function parseLayaArgs(argv) {
       if (!/^[a-z0-9-]+$/i.test(out.profile)) throw new Error(`Valor de --perfil no válido: ${out.profile}.`);
     } else if (a === "--forzar" && command === "laya-entrenar") out.force = true;
     else if (a === "--simular" && command === "laya-entrenar") out.dryRun = true;
+    else if (a === "--datos" && command === "laya-entrenar") out.datos = value(a, ++i);
+    else if (a === "--micro-batch" && command === "laya-entrenar") out.microBatch = posInt(a, ++i);
+    else if (a === "--grad-accum" && command === "laya-entrenar") out.gradAccum = posInt(a, ++i);
+    else if (a === "--max-len" && command === "laya-entrenar") out.maxLen = posInt(a, ++i);
     else if (a === "--quitar" && command === "laya-usar") out.remove = true;
     else if (command === "laya-usar" && !a.startsWith("--") && !out.dir) out.dir = a;
     else throw new Error(`Opción no válida para ${command}: ${a}.`);

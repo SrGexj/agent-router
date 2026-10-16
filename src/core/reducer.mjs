@@ -51,7 +51,7 @@ export function reduceRun(run, ev) {
       status: "running", startedAt: ev.t, endedAt: null, exitCode: null,
       mainModel: null, orchestratorActiveAt: null, lastText: "",
       tasks: {}, taskOrder: [], pending: [], quota: null, usage: null, orchestratorUsage: null, errors: [], limit: null,
-      waiting: null, asked: [], shadow: null, blockedCount: 0, updatedAt: ev.t
+      waiting: null, asked: [], shadow: null, blockedCount: 0, layaDecisions: 0, layaApplied: 0, updatedAt: ev.t
     };
   }
   if (!run) return null;
@@ -72,6 +72,8 @@ export function reduceRun(run, ev) {
       return { ...base, pending: [...(base.pending ?? []), { agent: ev.agent, description: ev.description, prompt: ev.prompt }] };
     case "task_blocked":
       return { ...base, blockedCount: (base.blockedCount ?? 0) + 1 };
+    case "laya_decision":
+      return { ...base, layaDecisions: (base.layaDecisions ?? 0) + 1, layaApplied: (base.layaApplied ?? 0) + (ev.applied ? 1 : 0) };
     case "task_start": {
       // Los hooks no traen la descripción en SubagentStart: se toma de la llamada a Agent pendiente.
       let { description, prompt } = ev;

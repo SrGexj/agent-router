@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Hook de las sesiones `co`/`cop`: traduce cada evento de Claude Code a eventos del dashboard.
-// Siempre sale con 0. Solo escribe en stdout al inyectar pendientes tras compactar y al denegar subagentes bloqueados (blockedAgents).
+// Siempre sale con 0. Solo escribe en stdout al inyectar pendientes tras compactar y al denegar subagentes bloqueados (blockedAgents) y al bajar de nivel un subagente (layaRouting=downgrade).
 import { spawn } from "node:child_process";
 import { appendFile, mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -15,6 +15,8 @@ import { makeRunId } from "../src/core/run.mjs";
 import { reduceEvents } from "../src/core/reducer.mjs";
 import { compactionsFromTranscript } from "../src/core/compaction.mjs";
 import { blockEvent, decideBlock, denyOutput } from "../src/core/block-agents.mjs";
+import { createLayaClassifier } from "../src/core/classifier.mjs";
+import { routeAgent } from "../src/core/laya-routing.mjs";
 import { collectPending, formatPending } from "../src/core/pending.mjs";
 
 const config = loadConfig();
@@ -156,6 +158,21 @@ try {
     process.stdout.write(JSON.stringify(denyOutput(block.reason)));
     if (session.runId) await store.append(session.runId, blockEvent(payload, block.agent, Date.now()));
     process.exit(0);
+  }
+
+  // Laya (sombra/downgrade): fail-open; si baja de nivel, el resto del hook ve ya el tool_input corregido.
+  if (config.layaRouting !== "off") {
+    try {
+      const classifier = createLayaClassifier({ url: config.shadow.layaUrl, fetch, timeoutMs: config.layaTimeoutMs, ...(config.layaRoutingModel && { model: config.layaRoutingModel }) });
+      const routed = await routeAgent({ payload, mode: config.layaRouting, threshold: config.layaDowngradeThreshold, classifier, timeoutMs: config.layaTimeoutMs });
+      if (routed) {
+        if (session.runId) await store.append(session.runId, routed.event);
+        if (routed.output) {
+          process.stdout.write(JSON.stringify(routed.output));
+          payload.tool_input = routed.input;
+        }
+      }
+    } catch { /* Laya nunca puede romper ni bloquear el hook */ }
   }
 
   const ctx = { profile: config.profile };

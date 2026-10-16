@@ -5,7 +5,7 @@ Uso (con el python del venv de Laya):
     python bin/laya-evaluar.py eval.jsonl MODELO salida.json
 
 MODELO es un alias (multilingual) o la carpeta de un checkpoint. Escribe en salida.json la lista de
-elecciones, una por fila y en el mismo orden. Lo lanza `router laya-entrenar`; no habla con el servicio.
+elecciones, una por fila y en el mismo orden (y, si el modelo da confianza, salida.json.confianza). Lo lanza `router laya-entrenar`; no habla con el servicio.
 """
 import json
 import sys
@@ -18,12 +18,18 @@ def main(data_path, model, out_path):
         rows = [json.loads(line) for line in f if line.strip()]
     agent = laya.load(model)
     preds = []
+    confs = []
     for row in rows:
         result = agent.system_one(row["state"], row["questions"])
         qid = next(iter(row["expected"]))
-        preds.append(result[qid]["choice"])
+        answer = result["answers"][qid]  # system_one devuelve {"answers": {qid: {"choice", "confidence", ...}}}
+        preds.append(answer["choice"])
+        confs.append(answer.get("confidence"))
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(preds, f)
+    if any(c is not None for c in confs):
+        with open(out_path + ".confianza", "w", encoding="utf-8") as f:
+            json.dump(confs, f)
 
 
 if __name__ == "__main__":

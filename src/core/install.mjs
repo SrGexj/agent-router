@@ -49,8 +49,8 @@ export function layaInstallPlan({ python, venv, venvExists }) {
 }
 
 // laya-serve escucha por defecto en 0.0.0.0: aquí se ata SIEMPRE a `host` (127.0.0.1). Solo el checkpoint multilingüe.
-export function layaServiceSpec({ label, serveBin, home, host, port }) {
-  const env = { LAYA_HOST: host, LAYA_PORT: String(port), LAYA_MODELS: "multilingual", LAYA_DEFAULT_MODEL: "multilingual", USE_TF: "0", HF_HOME: `${home}/hf` };
+export function layaServiceSpec({ label, serveBin, home, host, port, extraModels = {} }) {
+  const env = { LAYA_HOST: host, LAYA_PORT: String(port), LAYA_MODELS: "multilingual", LAYA_DEFAULT_MODEL: "multilingual", USE_TF: "0", HF_HOME: `${home}/hf`, ...(Object.keys(extraModels).length && { LAYA_EXTRA_MODELS: JSON.stringify(extraModels) }) };
   return { label, argv: [serveBin], env, logFile: `${home}/laya.log` };
 }
 

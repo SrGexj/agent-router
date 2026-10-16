@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import Scene from "./scene/Scene.jsx";
 import Timeline from "./Timeline.jsx";
 import { QuotaPanel, HistoryPanel, DetailPanel } from "./Panels.jsx";
@@ -25,8 +25,29 @@ const Icon = ({ name }) => <svg viewBox="0 0 24 24" aria-hidden="true">{ICONS[na
 
 function ActiveRuns({ active, onSelect }) {
   const labelOf = useProfileLabel();
+  const ref = useRef(null);
+  const [edge, setEdge] = useState({ l: false, r: false });
+  const measure = useCallback(() => {
+    const el = ref.current;
+    if (!el) return;
+    const l = el.scrollLeft > 1, r = el.scrollLeft + el.clientWidth < el.scrollWidth - 1;
+    setEdge((e) => (e.l === l && e.r === r ? e : { l, r }));
+  }, []);
+  useLayoutEffect(() => {
+    measure();
+    const el = ref.current;
+    if (!el || typeof ResizeObserver === "undefined") return undefined;
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [measure, active]);
+  const shownId = active.find((p) => p.shown)?.id;
+  useEffect(() => {
+    const el = ref.current?.querySelector(".run-pill.on");
+    el?.scrollIntoView?.({ inline: "nearest", block: "nearest" });
+  }, [shownId]);
   return (
-    <div className="active-runs" role="group" aria-label="Ejecuciones en curso">
+    <div ref={ref} onScroll={measure} className={`active-runs ${edge.l ? "fade-l" : ""} ${edge.r ? "fade-r" : ""}`} role="group" aria-label="Ejecuciones en curso">
       {active.map((p) => {
         const st = pillStatus(p);
         return (
@@ -107,6 +128,7 @@ export default function App() {
   const shadowByProfile = useMemo(() => aggregateShadowByProfile(runList), [runList]);
   if (!snap) return null;
   const { mode, run } = snap;
+  const live = mode !== "demo" && mode !== "historial";
   const detailRun = (mode === "demo" ? null : run) ?? runList[0] ?? null;
 
   return (
@@ -117,11 +139,11 @@ export default function App() {
         <div className="card-top">
           <ActiveRuns active={snap.active} onSelect={setView} />
           <div className="top-controls">
-            {mode === "historial" && <span className="hist-chip">Historial</span>}
+            {mode === "historial" && <span className="hist-chip">historial</span>}
             <AlertControls prefs={alertPrefs} denied={notifDenied} onToggleSound={() => updatePrefs({ sound: !alertPrefs.sound })} onToggleNotifications={toggleNotifications} />
             <ThemeToggle />
             <div className="seg-ctl" role="group" aria-label="Vista">
-              <button className={view !== "demo" ? "on" : ""} aria-pressed={view !== "demo"} onClick={() => setView("auto")}>En vivo</button>
+              <button className={live ? "on" : ""} aria-pressed={live} onClick={() => setView("auto")}>En vivo</button>
               <button className={view === "demo" ? "on" : ""} aria-pressed={view === "demo"} onClick={() => setView("demo")}>Demo</button>
             </div>
           </div>

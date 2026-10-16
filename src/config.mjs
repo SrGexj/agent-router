@@ -1,6 +1,7 @@
 // Único módulo que lee variables de entorno. El resto recibe la configuración ya resuelta.
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
+import { LAYA_ROUTING_MODES } from "./core/laya-routing.mjs";
 
 const PERMISSION_MODES = new Set(["acceptEdits", "auto", "manual", "dontAsk", "plan"]);
 const LOCAL_HOSTS = new Set(["127.0.0.1", "localhost", "::1"]);
@@ -44,7 +45,7 @@ export const CONFIG_KEYS = Object.freeze([
   "ROUTER_HOST", "ROUTER_PORT", "ROUTER_ALLOW_REMOTE", "ROUTER_ACCESS_TOKEN", "ROUTER_PERMISSION_MODE", "ROUTER_EFFORT", "ROUTER_FALLBACK_MODEL", "ROUTER_MAX_BUDGET_USD",
   "ROUTER_SEAT_USD", "ROUTER_MONITOR_BIN", "ROUTER_MONITOR_WAREHOUSE",
   "ROUTER_SHADOW", "ROUTER_SHADOW_PROVIDER", "ROUTER_SHADOW_MODEL",
-  "ROUTER_LAYA_URL", "ROUTER_LAYA_VENV", "ROUTER_LAYA_HF_HOME", "ROUTER_LAYA_PYTHON",
+  "ROUTER_LAYA_URL", "ROUTER_LAYA_ROUTING", "ROUTER_LAYA_DOWNGRADE_THRESHOLD", "ROUTER_LAYA_TIMEOUT_MS", "ROUTER_LAYA_VENV", "ROUTER_LAYA_HF_HOME", "ROUTER_LAYA_PYTHON",
   "ROUTER_PROFILE_LABEL", "ROUTER_PROFILE2_DIR", "ROUTER_PROFILE2_LABEL", "ROUTER_PROFILE2_ALIAS", "ROUTER_PROFILE2_ARGS"
 ]);
 const KEY_SET = new Set(CONFIG_KEYS);
@@ -145,6 +146,12 @@ export function loadConfig(processEnv = process.env, { exists = existsSync, read
     accessToken = null;
   }
 
+  // Enrutado por Laya en el hook de Agent/Task: off | shadow (solo anota) | downgrade (baja programador -> asistente con confianza alta).
+  const layaRouting = env.ROUTER_LAYA_ROUTING || "off";
+  if (!LAYA_ROUTING_MODES.includes(layaRouting)) throw new Error(`ROUTER_LAYA_ROUTING no válido: ${layaRouting} (${LAYA_ROUTING_MODES.join(", ")}).`);
+  const thr = Number(env.ROUTER_LAYA_DOWNGRADE_THRESHOLD);
+  const tmo = Number(env.ROUTER_LAYA_TIMEOUT_MS);
+
   const budget = env.ROUTER_MAX_BUDGET_USD ? Number(env.ROUTER_MAX_BUDGET_USD) : null;
   const seat = env.ROUTER_SEAT_USD ? Number(env.ROUTER_SEAT_USD) : null;
 
@@ -169,6 +176,9 @@ export function loadConfig(processEnv = process.env, { exists = existsSync, read
     claudeBin: env.CLAUDE_BIN || "claude",
     // Subagentes que el hook PreToolUse deniega (heredan Opus). Vacío = desactivado.
     blockedAgents: (env.ROUTER_BLOCKED_AGENTS ?? "general-purpose,fork").split(",").map((s) => s.trim()).filter(Boolean),
+    layaRouting,
+    layaDowngradeThreshold: env.ROUTER_LAYA_DOWNGRADE_THRESHOLD && thr > 0 && thr <= 1 ? thr : 0.9,
+    layaTimeoutMs: env.ROUTER_LAYA_TIMEOUT_MS && Number.isInteger(tmo) && tmo > 0 ? tmo : 300,
     // Modo sombra: un clasificador anota qué habría elegido; no cambia nada. Proveedor: Laya local ("laya") o Jev vía OpenRouter ("jev").
     shadow: {
       enabled: shadowEnabled,

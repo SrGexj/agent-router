@@ -199,7 +199,9 @@ export function translateHook(p, session, now, makeRunId, ctx = {}) {
     case "PermissionDenied":
       return keep([{ type: "error", kind: "permission", message: `${p.tool_name ?? "Herramienta"} denegado`, t }]);
     case "Stop":
-      if ((p.background_tasks ?? []).length > 0) return keep([{ type: "thinking", taskId: null, text: "", t }]);
+      // Tareas en segundo plano que no son subagentes del run (shells, monitores) no dejan la ejecución abierta:
+      // sin subagentes en marcha la sesión queda parada esperando al usuario. Sin dato (ctx.runningTasks) se asume que sí hay.
+      if ((p.background_tasks ?? []).length > 0 && (ctx.runningTasks ?? 1) > 0) return keep([{ type: "thinking", taskId: null, text: "", t }]);
       return close([{ type: "run_end", exitCode: 0, t }]);
     case "StopFailure": {
       const err = p.error === "rate_limit"

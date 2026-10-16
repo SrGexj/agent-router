@@ -189,6 +189,37 @@ export function spendShare(run) {
   return { opus: Math.max(0, 100 - sonnet - haiku), sonnet, haiku };
 }
 
+// Tokens por FAMILIA DE MODELO REAL (orquestador + encargos). total = input + output + cacheRead + cacheWrite (5m+1h);
+// fresh = lo mismo sin cacheRead, porque la lectura de caché domina el volumen.
+export function tokensByFamily(run) {
+  const out = { opus: { total: 0, fresh: 0 }, sonnet: { total: 0, fresh: 0 }, haiku: { total: 0, fresh: 0 } };
+  const byModels = [run?.orchestratorUsage, ...(run?.taskOrder ?? []).map((id) => run.tasks[id].usage)];
+  for (const byModel of byModels) {
+    for (const [model, raw] of Object.entries(byModel ?? {})) {
+      const u = addUsage(emptyUsage(), raw);
+      const fam = out[modelFamily(model)];
+      if (!fam) continue; // familia desconocida: no entra en el reparto
+      fam.total += totalTokens(u);
+      fam.fresh += u.input + u.output + u.cacheWrite5m + u.cacheWrite1h;
+    }
+  }
+  return out;
+}
+
+// Reparto del uso en tokens para la barra de la escena (% + absolutos). null sin tokens.
+export function tokenShare(run) {
+  const f = tokensByFamily(run);
+  const sum = f.opus.total + f.sonnet.total + f.haiku.total;
+  if (sum <= 0) return null;
+  const sonnet = Math.round((f.sonnet.total / sum) * 100);
+  const haiku = Math.round((f.haiku.total / sum) * 100);
+  return {
+    opus: Math.max(0, 100 - sonnet - haiku), sonnet, haiku,
+    tokens: { opus: f.opus.total, sonnet: f.sonnet.total, haiku: f.haiku.total },
+    fresh: { opus: f.opus.fresh, sonnet: f.sonnet.fresh, haiku: f.haiku.fresh }
+  };
+}
+
 // Qué barras tienen algún encargo sin uso conocido (en curso o terminado sin datos): su parte del gasto es
 // desconocida, no cero. Sirve para no pintar "0 %" donde en realidad aún no se sabe. Sin uso, la familia es la del
 // modelo del encargo si se conoce y si no la esperada por su nodo (asistente Haiku, programador Sonnet, propio Opus).

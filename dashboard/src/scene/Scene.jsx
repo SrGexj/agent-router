@@ -1,9 +1,9 @@
 import { useEffect, useRef } from "react";
 import { boxFaces, isoCircle, iso, bezierPoint, bezierPath, easeInOut, shadowLink, LAYA } from "./geometry.js";
 import { workerView } from "../../../src/core/view.mjs";
-import { spendShare, isWaiting } from "../../../src/core/details.mjs";
+import { spendShare, tokenShare, isWaiting } from "../../../src/core/details.mjs";
 import { runContext, runBusy, contextAdvice } from "../../../src/core/compaction.mjs";
-import { fmtDuration, layaNode, orchestratorSub, ownSubagentsLine, spendPending, workerSub } from "../captions.js";
+import { fmtDuration, usageTitle, layaNode, orchestratorSub, ownSubagentsLine, spendPending, workerSub } from "../captions.js";
 
 export const VB = { w: 960, h: 548 };
 
@@ -182,6 +182,7 @@ export default function Scene({ run, phase, now, packets }) {
   const asis = workerView(run, "asistente", now);
   const prog = workerView(run, "programador", now);
   const share = spendShare(run);
+  const uso = tokenShare(run);
   const ctx = runContext(run);
   const advice = ctx ? contextAdvice(ctx.pct, runBusy(run, now)) : null;
   const manual = run?.mode === "manual";
@@ -269,6 +270,21 @@ export default function Scene({ run, phase, now, packets }) {
               <span>Opus <b>{share ? `${share.opus}%` : "—"}</b></span>
               <span>Sonnet <b>{share ? `${share.sonnet}%` : "—"}</b></span>
               <span>Haiku <b>{share ? `${share.haiku}%` : "—"}</b></span>
+            </div>
+          )}
+          {uso && (
+            <div className="split-uso" title={usageTitle(uso)}>
+              <div className="split-cap">uso</div>
+              <div className="bar">
+                <span className="seg opus" style={{ width: `${uso.opus}%` }} />
+                <span className="seg sonnet" style={{ width: `${uso.sonnet}%` }} />
+                <span className="seg haiku" style={{ width: `${uso.haiku}%` }} />
+              </div>
+              <div className="split-labels">
+                <span>Opus <b>{uso.opus}%</b></span>
+                <span>Sonnet <b>{uso.sonnet}%</b></span>
+                <span>Haiku <b>{uso.haiku}%</b></span>
+              </div>
             </div>
           )}
           {ctx && (

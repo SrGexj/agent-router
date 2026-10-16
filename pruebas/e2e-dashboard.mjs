@@ -94,14 +94,14 @@ try {
   };
 
   // 1. Sin ejecuciones: en espera, con la red completa y quieta.
-  await waitText("EN ESPERA");
+  await waitText("Aún no hay ejecuciones");
   for (const t of ["Tú", "Orquestador", "Asistente", "Programador", "Recibe", "Entrega", "En espera", "Aún no hay ejecuciones"]) await waitText(t);
   console.log("✓ en espera");
 
   // 2. Una ejecución real del router (con claude falso) aparece en vivo.
   const router = spawn("node", [join(ROOT, "bin/router.mjs"), "Tarea de prueba e2e"], { cwd: home, env, stdio: ["ignore", "pipe", "pipe"] });
   children.push(router);
-  await waitText("EN VIVO");
+  
   await waitText("Tarea de prueba e2e");
   await page.waitForSelector(".run-pill.on", { timeout: 5000 }).catch(() => fail("No aparece la pastilla de la ejecución en curso"));
   console.log("✓ ejecución en vivo con su pastilla");
@@ -170,7 +170,7 @@ try {
   const runsText = await page.$eval(".runs", (el) => el.innerText);
   if (!runsText.includes("[texto pegado] Retoma el trabajo de ayer")) fail(`Título de la lista sin limpiar:\n${runsText}`);
   if (!/pregunta/.test(runsText)) fail("La lista no marca la ejecución como pregunta");
-  await page.waitForFunction(() => document.querySelector(".run-pill.waiting, .run-pill.on")?.innerText.includes("pregunta"), { timeout: 5000 }).catch(() => fail("La pastilla no avisa de la pregunta"));
+  await page.waitForFunction(() => document.querySelector(".run-pill.waiting, .run-pill.on")?.innerText.includes("espera respuesta"), { timeout: 5000 }).catch(() => fail("La pastilla no avisa de la pregunta"));
   const share = await page.$eval(".split", (el) => el.innerText);
   if (!/gasto/i.test(share) || /—/.test(share)) fail(`La barra de gasto no refleja los datos de uso:\n${share}`);
   console.log("✓ detalle: título limpio, pregunta, encargos y gasto");

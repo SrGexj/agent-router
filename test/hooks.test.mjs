@@ -369,6 +369,32 @@ describe("gasto del orquestador en vivo", () => {
     expect(liveUsageDue(post, { ...open1(), transcriptOffset: undefined }, T)).toBe(false);
   });
 
+  it("liveUsageDue: PreToolUse de Agent/Task (delegar) también vuelca; otras herramientas no", () => {
+    const s = open1();
+    expect(liveUsageDue({ hook_event_name: "PreToolUse", tool_name: "Agent" }, s, T)).toBe(true);
+    expect(liveUsageDue({ hook_event_name: "PreToolUse", tool_name: "Task" }, s, T)).toBe(true);
+    expect(liveUsageDue({ hook_event_name: "PreToolUse", tool_name: "Agent", agent_id: "a" }, s, T)).toBe(false);
+    expect(liveUsageDue({ hook_event_name: "PreToolUse", tool_name: "Bash" }, s, T)).toBe(false);
+    expect(liveUsageDue({ hook_event_name: "PreToolUse", tool_name: "Agent" }, { ...s, lastUsageAt: T - 5000 }, T)).toBe(false);
+  });
+
+  it("delegar con Agent emite task_request y luego orchestrator_usage", () => {
+    const res = hook({ hook_event_name: "PreToolUse", tool_name: "Agent", tool_input: { subagent_type: "programador" } }, open1(), ctx());
+    expect(res.events.map((e) => e.type)).toEqual(["task_request", "orchestrator_usage"]);
+    expect(res.session.lastUsageAt).toBe(T);
+  });
+
+  it("run nuevo: el primer PostToolUse vuelca aunque el run anterior volcara hace poco", () => {
+    const prev = { ...open1(), lastUsageAt: T - 1000, usageState: { offset: 5, byModel: {}, recent: [] } };
+    const started = hook({ hook_event_name: "UserPromptSubmit", prompt: "otro", session_id: "abcdef12-3456" }, { ...prev, runId: null }, { transcriptSize: 50 });
+    expect(started.session.lastUsageAt).toBeUndefined();
+    expect(liveUsageDue(post, started.session, T)).toBe(true);
+    // con run abierto + Esc (cancela y abre otro) tampoco arrastra lastUsageAt
+    const resumed = hook({ hook_event_name: "UserPromptSubmit", prompt: "otro" }, prev, { transcriptSize: 50, interrupted: true });
+    expect(resumed.session.lastUsageAt).toBeUndefined();
+    expect(resumed.session.usageState).toBeUndefined();
+  });
+
   it("PostToolUse emite orchestrator_usage y guarda lastUsageAt y el estado incremental", () => {
     const res = hook(post, open1(), ctx());
     expect(res.events).toEqual([{ type: "orchestrator_usage", ...usage("claude-opus-5-5", 4), t: T }]);

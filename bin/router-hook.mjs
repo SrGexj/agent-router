@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Hook de las sesiones `co`/`cop`: traduce cada evento de Claude Code a eventos del dashboard.
-// Nunca bloquea a Claude: siempre sale con 0 y solo escribe en stdout al inyectar pendientes tras compactar.
+// Siempre sale con 0. Solo escribe en stdout al inyectar pendientes tras compactar y al denegar subagentes bloqueados (blockedAgents).
 import { spawn } from "node:child_process";
 import { appendFile, mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -14,6 +14,7 @@ import { advanceUsage, agentTranscriptPath, startUsage, usageFromTranscript } fr
 import { makeRunId } from "../src/core/run.mjs";
 import { reduceEvents } from "../src/core/reducer.mjs";
 import { compactionsFromTranscript } from "../src/core/compaction.mjs";
+import { blockEvent, decideBlock, denyOutput } from "../src/core/block-agents.mjs";
 import { collectPending, formatPending } from "../src/core/pending.mjs";
 
 const config = loadConfig();
@@ -146,6 +147,14 @@ try {
       try { await onCompactStats(payload, session, store); } catch { /* el coste es accesorio: nunca impide inyectar pendientes */ }
       await onSessionStartCompact(payload, Date.now());
     }
+    process.exit(0);
+  }
+
+  // Subagentes que heredan Opus: se deniega el lanzamiento (sin task_request, que quedaría pendiente para siempre).
+  const block = decideBlock(payload, config.blockedAgents);
+  if (block) {
+    process.stdout.write(JSON.stringify(denyOutput(block.reason)));
+    if (session.runId) await store.append(session.runId, blockEvent(payload, block.agent, Date.now()));
     process.exit(0);
   }
 

@@ -167,6 +167,8 @@ export function loadConfig(processEnv = process.env, { exists = existsSync, read
     fallbackModel: env.ROUTER_FALLBACK_MODEL ?? "sonnet",
     maxBudgetUsd: Number.isFinite(budget) ? budget : null,
     claudeBin: env.CLAUDE_BIN || "claude",
+    // Subagentes que el hook PreToolUse deniega (heredan Opus). Vacío = desactivado.
+    blockedAgents: (env.ROUTER_BLOCKED_AGENTS ?? "general-purpose,fork").split(",").map((s) => s.trim()).filter(Boolean),
     // Modo sombra: un clasificador anota qué habría elegido; no cambia nada. Proveedor: Laya local ("laya") o Jev vía OpenRouter ("jev").
     shadow: {
       enabled: shadowEnabled,

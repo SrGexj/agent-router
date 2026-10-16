@@ -163,7 +163,7 @@ try {
   // Laya (sombra/downgrade): fail-open; si baja de nivel, el resto del hook ve ya el tool_input corregido.
   if (config.layaRouting !== "off") {
     try {
-      const classifier = createLayaClassifier({ url: config.shadow.layaUrl, fetch, timeoutMs: config.layaTimeoutMs });
+      const classifier = createLayaClassifier({ url: config.shadow.layaUrl, fetch, timeoutMs: config.layaTimeoutMs, ...(config.layaRoutingModel && { model: config.layaRoutingModel }) });
       const routed = await routeAgent({ payload, mode: config.layaRouting, threshold: config.layaDowngradeThreshold, classifier, timeoutMs: config.layaTimeoutMs });
       if (routed) {
         if (session.runId) await store.append(session.runId, routed.event);

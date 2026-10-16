@@ -34,8 +34,8 @@ export function layaDecisionEvent({ payload, requested, result, latencyMs, mode,
   };
 }
 
-// updatedInput parcial falla la validación de Claude Code: siempre el tool_input completo.
-export const updatedInputOutput = (updatedInput) => ({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "allow", updatedInput } });
+// updatedInput parcial falla la validación de Claude Code: siempre el tool_input completo. Sin permissionDecision: se respeta el flujo normal de permisos.
+export const updatedInputOutput = (updatedInput) => ({ hookSpecificOutput: { hookEventName: "PreToolUse", updatedInput } });
 
 const withTimeout = (promise, ms) => new Promise((resolve, reject) => {
   const timer = setTimeout(() => reject(new Error("timeout")), ms);

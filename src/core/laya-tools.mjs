@@ -155,9 +155,12 @@ export async function layaUsar({ config, opts, log = console.log, platform = def
   log(`Anotado en ${config.laya.activeFile}: ${dir}`);
   log("");
   log("Todavía no se aplica: laya-serve lee el checkpoint al arrancar. Para aplicarlo hay que arrancar laya-serve con");
-  log(`  LAYA_EXTRA_MODELS='${JSON.stringify({ multilingual: dir })}'`);
-  log(`(re-apunta el nombre «multilingual» a tu checkpoint; las peticiones del modo sombra siguen igual) en el ${platform.serviceKind} com.agent-router.laya,`);
-  log(`y reiniciarlo con: ${platform.restartHint("com.agent-router.laya")}`);
-  log("Para volver al base: router laya-usar --quitar y quitar esa variable.");
+  log(`  LAYA_EXTRA_MODELS='${JSON.stringify({ encargos: dir })}'`);
+  log("(se registra con nombre propio; «multilingual» no cambia). Lo más simple: en config.env pon");
+  log(`  ROUTER_LAYA_EXTRA_MODELS='${JSON.stringify({ encargos: dir })}'`);
+  log("  ROUTER_LAYA_ROUTING_MODEL=encargos   (solo el enrutado de encargos usa ese modelo)");
+  log(`y ejecuta npm run instalar (regenera el ${platform.serviceKind} com.agent-router.laya con LAYA_EXTRA_MODELS).`);
+  log(`Reinicio manual del servicio: ${platform.restartHint("com.agent-router.laya")}`);
+  log("Para volver al base: router laya-usar --quitar y quitar esas dos variables.");
   return { ok: true, dir };
 }

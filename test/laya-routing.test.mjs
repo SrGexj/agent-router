@@ -2,6 +2,17 @@ import { describe, it, expect } from "vitest";
 import { decideRouting, layaText, routeAgent, layaDecisionEvent, updatedInputOutput } from "../src/core/laya-routing.mjs";
 import { loadConfig } from "../src/config.mjs";
 import { reduceEvents } from "../src/core/reducer.mjs";
+import { createLayaClassifier, LAYA_MODEL } from "../src/core/classifier.mjs";
+
+describe("modelo propio del enrutado", () => {
+  it("la petición usa el modelo indicado y por defecto el multilingüe", async () => {
+    const bodies = [];
+    const fetch = async (_u, init) => { bodies.push(JSON.parse(init.body)); return { ok: true, json: async () => ({ answers: { route: { choice: "opus", confidence: 0.5 } } }) }; };
+    await createLayaClassifier({ url: "u", fetch, model: "encargos" }).classify("x");
+    await createLayaClassifier({ url: "u", fetch }).classify("x");
+    expect(bodies.map((b) => b.model)).toEqual(["encargos", LAYA_MODEL]);
+  });
+});
 
 const pre = (input, tool = "Agent", extra = {}) => ({ hook_event_name: "PreToolUse", tool_name: tool, tool_input: input, ...extra });
 const res = (choice, confidence) => ({ choice, confidence });
@@ -52,7 +63,7 @@ describe("routeAgent", () => {
     expect(out.input).toEqual({ ...input, subagent_type: "asistente" });
     expect(out.input).not.toBe(input);
     expect(input.subagent_type).toBe("programador");
-    expect(out.output).toEqual({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "allow", updatedInput: { ...input, subagent_type: "asistente" } } });
+    expect(out.output).toEqual({ hookSpecificOutput: { hookEventName: "PreToolUse", updatedInput: { ...input, subagent_type: "asistente" } } });
   });
   it("error del clasificador: fail-open, sin evento de decisión aplicada", async () => {
     const classifier = { classify: async () => { throw new Error("laya no disponible"); } };

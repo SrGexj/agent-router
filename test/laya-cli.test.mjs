@@ -213,7 +213,7 @@ describe("laya-usar", () => {
     expect((await readFile(config.laya.activeFile, "utf8")).trim()).toBe(dir);
     const text = logs.join("\n");
     expect(text).toContain("LAYA_EXTRA_MODELS");
-    expect(text).toContain(JSON.stringify({ multilingual: dir }));
+    expect(text).toContain(JSON.stringify({ encargos: dir }));
     expect(text).toMatch(/launchctl kickstart -k gui\/\$\(id -u\)\/com\.agent-router\.laya/);
     expect(text).toContain("LaunchAgent");
   });

@@ -69,7 +69,7 @@ async function installLaya() {
       const r = spawnSync(cmd, args, { encoding: "utf8" });
       if (r.status !== 0) return log(`Laya OMITIDO: falló ${cmd} ${args[0]} (${(r.stderr || r.error?.message || "").trim().split("\n").pop()})`);
     }
-    const res = await platform.serviceInstall(layaServiceSpec({ label: LAYA_LABEL, serveBin: join(paths.layaVenv, "bin/laya-serve"), home: config.home, host: LAYA_HOST, port: LAYA_PORT }));
+    const res = await platform.serviceInstall(layaServiceSpec({ label: LAYA_LABEL, serveBin: join(paths.layaVenv, "bin/laya-serve"), home: config.home, host: LAYA_HOST, port: LAYA_PORT, extraModels: config.layaExtraModels }));
     log(res.ok ? `Laya activo en http://${LAYA_HOST}:${LAYA_PORT} (solo local; log en ${config.home}/laya.log; el modo sombra queda activado)` : `Laya OMITIDO: no se pudo cargar el servicio: ${res.error}`);
   } catch (e) { log(`Laya OMITIDO: ${e.message}`); }
 }

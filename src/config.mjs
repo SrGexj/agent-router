@@ -45,7 +45,7 @@ export const CONFIG_KEYS = Object.freeze([
   "ROUTER_HOST", "ROUTER_PORT", "ROUTER_ALLOW_REMOTE", "ROUTER_ACCESS_TOKEN", "ROUTER_PERMISSION_MODE", "ROUTER_EFFORT", "ROUTER_FALLBACK_MODEL", "ROUTER_MAX_BUDGET_USD",
   "ROUTER_SEAT_USD", "ROUTER_MONITOR_BIN", "ROUTER_MONITOR_WAREHOUSE",
   "ROUTER_SHADOW", "ROUTER_SHADOW_PROVIDER", "ROUTER_SHADOW_MODEL",
-  "ROUTER_LAYA_URL", "ROUTER_LAYA_ROUTING", "ROUTER_LAYA_DOWNGRADE_THRESHOLD", "ROUTER_LAYA_TIMEOUT_MS", "ROUTER_LAYA_VENV", "ROUTER_LAYA_HF_HOME", "ROUTER_LAYA_PYTHON",
+  "ROUTER_LAYA_URL", "ROUTER_LAYA_ROUTING", "ROUTER_LAYA_ROUTING_MODEL", "ROUTER_LAYA_EXTRA_MODELS", "ROUTER_LAYA_DOWNGRADE_THRESHOLD", "ROUTER_LAYA_TIMEOUT_MS", "ROUTER_LAYA_VENV", "ROUTER_LAYA_HF_HOME", "ROUTER_LAYA_PYTHON",
   "ROUTER_PROFILE_LABEL", "ROUTER_PROFILE2_DIR", "ROUTER_PROFILE2_LABEL", "ROUTER_PROFILE2_ALIAS", "ROUTER_PROFILE2_ARGS"
 ]);
 const KEY_SET = new Set(CONFIG_KEYS);
@@ -149,6 +149,11 @@ export function loadConfig(processEnv = process.env, { exists = existsSync, read
   // Enrutado por Laya en el hook de Agent/Task: off | shadow (solo anota) | downgrade (baja programador -> asistente con confianza alta).
   const layaRouting = env.ROUTER_LAYA_ROUTING || "off";
   if (!LAYA_ROUTING_MODES.includes(layaRouting)) throw new Error(`ROUTER_LAYA_ROUTING no válido: ${layaRouting} (${LAYA_ROUTING_MODES.join(", ")}).`);
+  let layaExtraModels = {};
+  if (env.ROUTER_LAYA_EXTRA_MODELS) {
+    try { layaExtraModels = JSON.parse(env.ROUTER_LAYA_EXTRA_MODELS); } catch { layaExtraModels = null; }
+    if (!layaExtraModels || typeof layaExtraModels !== "object" || Array.isArray(layaExtraModels)) throw new Error('ROUTER_LAYA_EXTRA_MODELS no válido: debe ser un objeto JSON {"nombre": "carpeta"}.');
+  }
   const thr = Number(env.ROUTER_LAYA_DOWNGRADE_THRESHOLD);
   const tmo = Number(env.ROUTER_LAYA_TIMEOUT_MS);
 
@@ -177,6 +182,10 @@ export function loadConfig(processEnv = process.env, { exists = existsSync, read
     // Subagentes que el hook PreToolUse deniega (heredan Opus). Vacío = desactivado.
     blockedAgents: (env.ROUTER_BLOCKED_AGENTS ?? "general-purpose,fork").split(",").map((s) => s.trim()).filter(Boolean),
     layaRouting,
+    // Modelo (nombre registrado en laya-serve) solo para la consulta de enrutado de encargos; vacío = el modelo actual.
+    layaRoutingModel: env.ROUTER_LAYA_ROUTING_MODEL || "",
+    // Checkpoints extra que el instalador pasa a laya-serve (LAYA_EXTRA_MODELS).
+    layaExtraModels,
     layaDowngradeThreshold: env.ROUTER_LAYA_DOWNGRADE_THRESHOLD && thr > 0 && thr <= 1 ? thr : 0.9,
     layaTimeoutMs: env.ROUTER_LAYA_TIMEOUT_MS && Number.isInteger(tmo) && tmo > 0 ? tmo : 300,
     // Modo sombra: un clasificador anota qué habría elegido; no cambia nada. Proveedor: Laya local ("laya") o Jev vía OpenRouter ("jev").

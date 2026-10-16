@@ -38,8 +38,8 @@ export function buildClassifierRequest(prompt, model) {
 }
 
 // Laya (laya-serve) habla el mismo protocolo, pero el estado es un objeto {body}; se fija el checkpoint multilingüe.
-export function buildLayaRequest(prompt) {
-  return { model: LAYA_MODEL, state: { body: prompt }, questions: ROUTE_QUESTIONS };
+export function buildLayaRequest(prompt, model = LAYA_MODEL) {
+  return { model, state: { body: prompt }, questions: ROUTE_QUESTIONS };
 }
 
 const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
@@ -95,14 +95,15 @@ export function createOpenRouterClassifier({ apiKey, model, fetch, now = Date.no
 }
 
 // Laya en local: sin clave, coste 0. Servidor caído, lento o con 5xx → "laya no disponible".
-export function createLayaClassifier({ url, fetch, now = Date.now, timeoutMs = LAYA_TIMEOUT_MS }) {
+// `model`: nombre de un checkpoint registrado en laya-serve (p. ej. vía LAYA_EXTRA_MODELS); por defecto el multilingüe.
+export function createLayaClassifier({ url, fetch, now = Date.now, timeoutMs = LAYA_TIMEOUT_MS, model = LAYA_MODEL }) {
   const down = () => new Error("laya no disponible");
   async function classify(prompt) {
     const t0 = now();
-    const res = await postJson({ url, body: buildLayaRequest(prompt), fetch, timeoutMs, netMsg: () => "laya no disponible" });
+    const res = await postJson({ url, body: buildLayaRequest(prompt, model), fetch, timeoutMs, netMsg: () => "laya no disponible" });
     if (!res.ok) throw res.status >= 500 ? down() : new Error(`HTTP ${res.status}`);
     const parsed = parseClassifierResponse(await readJson(res));
-    return { ...parsed, costUsd: 0, model: LAYA_MODEL, latencyMs: now() - t0 };
+    return { ...parsed, costUsd: 0, model, latencyMs: now() - t0 };
   }
   return { classify };
 }

@@ -145,6 +145,15 @@ describe("pastillas de ejecuciones en curso", () => {
     expect(frame(e, 1300, { runs: { a: a1, b } }).active.find((p) => p.id === "a").alert).toBe(false);
   });
 
+  it("un encargo sin señal durante LOST_AFTER_MS deja de contar como trabajando en la escena", () => {
+    const e = mk();
+    const r = reduceEvents([startOf("a", 1_000_000, "/p/a"), { type: "task_start", taskId: "t", agent: "asistente", description: "", prompt: "", t: 1_000_001 }]);
+    const alive = frame(e, 1000, { runs: { a: r } }).run;
+    expect(alive.tasks.t.status).toBe("running");
+    const later = e.frame({ perfNow: 2000, wallNow: 1_000_001 + 10 * 60_000, view: "auto", runs: { a: r }, paused: false }).run;
+    expect(later.tasks.t).toMatchObject({ status: "failed", lost: true });
+  });
+
   it("una ejecución sin señal no secuestra el modo automático", () => {
     const e = mk();
     const stale = reduceEvents([startOf("s", -1_000_000, "/p")]);

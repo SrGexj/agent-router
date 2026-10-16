@@ -22,7 +22,7 @@ function withTask(run, taskId, patch) {
   const prev = run.tasks[taskId] ?? {
     id: taskId, agent: "general-purpose", node: "programador", description: "", prompt: "",
     status: "running", startedAt: null, endedAt: null, model: null, summary: "", result: "", usage: null,
-    tokens: null, toolUses: null, durationMs: null, tools: 0, lastToolAt: null
+    tokens: null, toolUses: null, durationMs: null, tools: 0, lastToolAt: null, lastActivityAt: null
   };
   const known = taskId in run.tasks;
   return {
@@ -44,6 +44,26 @@ function mergeByModel(a, b) {
 const CLEARS_WAITING = new Set(["tool", "task_request", "thinking", "run_end"]);
 
 const ORPHAN_SKIP = new Set(["tool", "task_model", "task_stats", "task_end", "task_usage"]);
+
+// Un encargo "en marcha" sin eventos propios durante este tiempo se da por perdido: Claude Code no siempre
+// entrega SubagentStop y, sin esta red, el encargo se quedaría "trabajando" para siempre.
+export const LOST_AFTER_MS = 10 * 60_000;
+
+// Vista derivada (no se guarda): los encargos en marcha y silenciosos pasan a "failed" con lost:true. Si llega un
+// evento nuevo del encargo, la próxima evaluación ya no lo marca. "Ahora" entra como parámetro.
+export function markLostTasks(run, now) {
+  if (!run || run.status !== "running") return run;
+  let tasks = null;
+  for (const id of run.taskOrder) {
+    const t = run.tasks[id];
+    if (t.status !== "running") continue;
+    const last = t.lastActivityAt ?? t.startedAt;
+    if (last == null || now - last < LOST_AFTER_MS) continue;
+    tasks ??= { ...run.tasks };
+    tasks[id] = { ...t, status: "failed", lost: true, endedAt: last };
+  }
+  return tasks ? { ...run, tasks } : run;
+}
 
 export function reduceRun(run, ev) {
   if (!ev) return run;
@@ -72,7 +92,7 @@ export function reduceRun(run, ev) {
     case "tool": {
       if (!ev.taskId) return { ...base, orchestratorActiveAt: ev.t };
       const prev = base.tasks[ev.taskId];
-      return withTask(base, ev.taskId, { lastToolAt: ev.t, tools: (prev?.tools ?? 0) + 1 });
+      return withTask(base, ev.taskId, { lastToolAt: ev.t, lastActivityAt: ev.t, tools: (prev?.tools ?? 0) + 1 });
     }
     case "task_request":
       return { ...base, pending: [...(base.pending ?? []), { agent: ev.agent, description: ev.description, prompt: ev.prompt }] };
@@ -85,7 +105,7 @@ export function reduceRun(run, ev) {
       // Reanudar un subagente conocido (mismo agent_id, p. ej. SendMessage) no es un encargo nuevo: vuelve a
       // "running" conservando su descripción y sin gastar la llamada a Agent pendiente de otro encargo.
       const prevTask = base.tasks[ev.taskId];
-      if (prevTask) return withTask(base, ev.taskId, { status: "running", startedAt: ev.t, endedAt: null });
+      if (prevTask) return withTask(base, ev.taskId, { status: "running", startedAt: ev.t, endedAt: null, lastActivityAt: ev.t, lost: false });
       let { description, prompt } = ev;
       let pending = base.pending ?? [];
       if (!description) {
@@ -97,25 +117,28 @@ export function reduceRun(run, ev) {
       }
       return withTask({ ...base, pending }, ev.taskId, {
         agent: ev.agent, node: nodeFor(ev.agent, null), description,
-        prompt, status: "running", startedAt: ev.t
+        prompt, status: "running", startedAt: ev.t, lastActivityAt: ev.t
       });
     }
     case "task_model": {
       const prev = base.tasks[ev.taskId];
       const node = nodeFor(prev?.agent, ev.model);
-      return withTask(base, ev.taskId, { model: ev.model, node });
+      return withTask(base, ev.taskId, { model: ev.model, node, lastActivityAt: ev.t });
     }
     case "task_stats": {
       const prev = base.tasks[ev.taskId];
       const node = nodeFor(prev?.agent, ev.model);
       return withTask(base, ev.taskId, {
-        model: ev.model, node, tokens: ev.tokens ?? prev?.tokens ?? null,
+        model: ev.model, node, lastActivityAt: ev.t, tokens: ev.tokens ?? prev?.tokens ?? null,
         toolUses: ev.toolUses ?? prev?.toolUses ?? null, durationMs: ev.durationMs ?? prev?.durationMs ?? null
       });
     }
     case "task_end":
+      // Cierre por notificación (el orquestador recibe el fin del agente): solo cierra un encargo en marcha,
+      // para no pisar el resultado de un SubagentStop que llegue antes.
+      if (ev.source === "notification" && base.tasks[ev.taskId]?.status !== "running") return base;
       return withTask(base, ev.taskId, {
-        status: ev.status, endedAt: ev.t, summary: ev.summary ?? "", result: ev.result ?? base.tasks[ev.taskId]?.result ?? "",
+        status: ev.status, endedAt: ev.t, lost: false, summary: ev.summary ?? "", result: ev.result ?? base.tasks[ev.taskId]?.result ?? "",
         tokens: ev.tokens ?? base.tasks[ev.taskId]?.tokens ?? null,
         toolUses: ev.toolUses ?? base.tasks[ev.taskId]?.toolUses ?? null,
         durationMs: ev.durationMs ?? base.tasks[ev.taskId]?.durationMs ?? null
@@ -133,7 +156,7 @@ export function reduceRun(run, ev) {
     }
     case "task_usage":
       // snapshot: instantánea acumulada del transcript del subagente (sustituye); sin ella, suma.
-      return withTask(base, ev.taskId, { usage: ev.snapshot ? { ...(ev.byModel ?? {}) } : mergeByModel(base.tasks[ev.taskId]?.usage, ev.byModel) });
+      return withTask(base, ev.taskId, { lastActivityAt: ev.t, usage: ev.snapshot ? { ...(ev.byModel ?? {}) } : mergeByModel(base.tasks[ev.taskId]?.usage, ev.byModel) });
     case "orchestrator_usage":
       // Instantánea acumulada desde el inicio de la ejecución (se emite varias veces para el gasto en vivo).
       return { ...base, orchestratorUsage: ev.byModel ?? null };

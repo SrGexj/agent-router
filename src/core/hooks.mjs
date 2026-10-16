@@ -52,6 +52,25 @@ export function answerFrom(response, tool) {
 
 const usageEvents = (type, u, t, extra = {}) => (u && Object.keys(u.byModel ?? {}).length ? [{ type, ...extra, byModel: u.byModel, t }] : []);
 
+const AGENT_ID = /^[A-Za-z0-9]+$/;
+const NOTIFICATION_STATUS = { completed: "completed", killed: "killed" };
+
+// Claude Code no siempre lanza SubagentStop, pero el orquestador sí recibe el fin del agente asíncrono como mensaje:
+// el hand-back (<agent-message from="ID">) o la <task-notification> con su estado. Devuelve los agentes que terminan.
+export function endedAgentsFrom(prompt) {
+  const text = typeof prompt === "string" ? prompt : "";
+  const out = new Map();
+  for (const m of text.matchAll(/<task-notification>([\s\S]*?)<\/task-notification>/g)) {
+    const id = /<task-id>([^<]+)<\/task-id>/.exec(m[1])?.[1]?.trim();
+    const status = /<status>([^<]+)<\/status>/.exec(m[1])?.[1]?.trim();
+    if (id && AGENT_ID.test(id)) out.set(id, NOTIFICATION_STATUS[status] ?? "failed");
+  }
+  for (const m of text.matchAll(/<agent-message from="([^"]+)">/g)) {
+    if (AGENT_ID.test(m[1]) && !out.has(m[1])) out.set(m[1], "completed");
+  }
+  return [...out].map(([taskId, status]) => ({ taskId, status }));
+}
+
 const INTERRUPT = "[Request interrupted by user";
 
 // Solo cuenta la entrada que escribe Claude Code al pulsar Esc: un mensaje "user" de la sesión
@@ -104,8 +123,12 @@ export function translateHook(p, session, now, makeRunId, ctx = {}) {
   const none = { events: [], session, runId: open };
 
   if (p.hook_event_name === "UserPromptSubmit") {
-    // Con una ejecución abierta: si hubo Esc, se cierra y empieza otra; si no, es un mensaje a mitad de turno.
-    if (open && !ctx.interrupted) return none;
+    // Con una ejecución abierta: si hubo Esc, se cierra y empieza otra; si no, es un mensaje a mitad de turno
+    // (que puede ser el fin de un subagente asíncrono: se cierra su encargo aunque no llegue SubagentStop).
+    if (open && !ctx.interrupted) {
+      const ended = endedAgentsFrom(p.prompt).map((a) => ({ type: "task_end", taskId: a.taskId, status: a.status, source: "notification", t }));
+      return ended.length ? { events: ended, session, runId: open } : none;
+    }
     const before = open ? { runId: open, events: cancelEvents(t, ctx.orchestratorUsage) } : undefined;
     const seq = session.seq + 1;
     const runId = makeRunId(now, String(p.session_id ?? "sesion").slice(0, 8), seq);

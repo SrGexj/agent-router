@@ -12,7 +12,7 @@ import { interruptedIn, liveAgentUsageDue, liveUsageDue, translateHook } from ".
 import { MAX_FULL, readFrom, readSince, transcriptSize } from "../src/core/transcript.mjs";
 import { advanceUsage, agentTranscriptPath, startUsage, usageFromTranscript } from "../src/core/usage.mjs";
 import { makeRunId } from "../src/core/run.mjs";
-import { reduceEvents } from "../src/core/reducer.mjs";
+import { markLostTasks, reduceEvents } from "../src/core/reducer.mjs";
 import { compactionsFromTranscript } from "../src/core/compaction.mjs";
 import { blockEvent, decideBlock, denyOutput } from "../src/core/block-agents.mjs";
 import { createLayaClassifier } from "../src/core/classifier.mjs";
@@ -189,7 +189,7 @@ try {
     if (a) ctx.agentLive = a;
   }
   if (payload.hook_event_name === "Stop" && session.runId && (payload.background_tasks ?? []).length > 0) {
-    const run = reduceEvents(await store.readRun(session.runId));
+    const run = markLostTasks(reduceEvents(await store.readRun(session.runId)), Date.now());
     ctx.runningTasks = Object.values(run?.tasks ?? {}).filter((t) => t.status === "running").length;
   }
   const closes = CLOSING.has(payload.hook_event_name) || (payload.hook_event_name === "Stop" && ((payload.background_tasks ?? []).length === 0 || ctx.runningTasks === 0));

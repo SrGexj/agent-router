@@ -11,7 +11,7 @@ const monitor = createMonitorSource({
   run: execRun, now: Date.now, bin: config.consumo.monitorBin, refreshMs: config.consumo.refreshMs, warehouseDir: config.consumo.warehouseDir,
   seatUsdMonth: config.consumo.seatUsdMonth, profiles: discoverProfiles(config.userHome, [config.profiles.second?.dir])
 });
-const srv = await startServer({ store, host: config.host, port: config.port, monitor, profileLabels: config.profileLabels, accessToken: config.accessToken });
+const srv = await startServer({ store, host: config.host, port: config.port, monitor, profileLabels: config.profileLabels, settings: { contextWarnTokens: config.contextWarnTokens }, accessToken: config.accessToken });
 
 console.log(`Agent Router: http://${config.host}:${srv.port}`);
 console.log(`Ejecuciones: ${config.runsDir}`);

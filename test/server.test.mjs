@@ -223,3 +223,14 @@ describe("POST /api/runs/:id/label", () => {
     await post(app, "r1", { label: "asistente" }, { Host: "localhost:4317" }).expect(200); // sin Origin (curl)
   });
 });
+
+describe("API /api/settings", () => {
+  it("manda el umbral de aviso del contexto configurado", async () => {
+    const res = await request(createApp({ store: createStore({ runsDir: "/nada" }), settings: { contextWarnTokens: 90_000 } })).get("/api/settings").expect(200);
+    expect(res.body).toEqual({ contextWarnTokens: 90_000 });
+  });
+  it("sin configuración, 120000", async () => {
+    const res = await request(createApp({ store: createStore({ runsDir: "/nada" }) })).get("/api/settings").expect(200);
+    expect(res.body).toEqual({ contextWarnTokens: 120_000 });
+  });
+});

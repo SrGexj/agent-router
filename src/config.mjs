@@ -43,7 +43,7 @@ function resolveProfiles(env, home, exists) {
 export const CONFIG_KEYS = Object.freeze([
   "CLAUDE_BIN",
   "ROUTER_HOST", "ROUTER_PORT", "ROUTER_ALLOW_REMOTE", "ROUTER_ACCESS_TOKEN", "ROUTER_PERMISSION_MODE", "ROUTER_EFFORT", "ROUTER_FALLBACK_MODEL", "ROUTER_MAX_BUDGET_USD",
-  "ROUTER_SEAT_USD", "ROUTER_MONITOR_BIN", "ROUTER_MONITOR_WAREHOUSE",
+  "ROUTER_SEAT_USD", "ROUTER_CONTEXT_WARN_TOKENS", "ROUTER_MONITOR_BIN", "ROUTER_MONITOR_WAREHOUSE",
   "ROUTER_SHADOW", "ROUTER_SHADOW_PROVIDER", "ROUTER_SHADOW_MODEL",
   "ROUTER_LAYA_URL", "ROUTER_LAYA_ROUTING", "ROUTER_LAYA_ROUTING_MODEL", "ROUTER_LAYA_EXTRA_MODELS", "ROUTER_LAYA_DOWNGRADE_THRESHOLD", "ROUTER_LAYA_TIMEOUT_MS", "ROUTER_LAYA_VENV", "ROUTER_LAYA_HF_HOME", "ROUTER_LAYA_PYTHON",
   "ROUTER_PROFILE_LABEL", "ROUTER_PROFILE2_DIR", "ROUTER_PROFILE2_LABEL", "ROUTER_PROFILE2_ALIAS", "ROUTER_PROFILE2_ARGS"
@@ -146,6 +146,8 @@ export function loadConfig(processEnv = process.env, { exists = existsSync, read
     accessToken = null;
   }
 
+  // Contexto del orquestador a partir del cual el dashboard avisa (tokens). Un valor no numérico o ≤ 0 se ignora.
+  const ctxWarn = Number(env.ROUTER_CONTEXT_WARN_TOKENS);
   // Enrutado por Laya en el hook de Agent/Task: off | shadow (solo anota) | downgrade (baja programador -> asistente con confianza alta).
   const layaRouting = env.ROUTER_LAYA_ROUTING || "off";
   if (!LAYA_ROUTING_MODES.includes(layaRouting)) throw new Error(`ROUTER_LAYA_ROUTING no válido: ${layaRouting} (${LAYA_ROUTING_MODES.join(", ")}).`);
@@ -178,6 +180,7 @@ export function loadConfig(processEnv = process.env, { exists = existsSync, read
     effort: env.ROUTER_EFFORT || null,
     fallbackModel: env.ROUTER_FALLBACK_MODEL ?? "sonnet",
     maxBudgetUsd: Number.isFinite(budget) ? budget : null,
+    contextWarnTokens: Number.isFinite(ctxWarn) && ctxWarn > 0 ? Math.floor(ctxWarn) : 120_000,
     claudeBin: env.CLAUDE_BIN || "claude",
     // Subagentes que el hook PreToolUse deniega (heredan Opus). Vacío = desactivado.
     blockedAgents: (env.ROUTER_BLOCKED_AGENTS ?? "general-purpose,fork").split(",").map((s) => s.trim()).filter(Boolean),

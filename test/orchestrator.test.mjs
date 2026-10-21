@@ -46,6 +46,13 @@ describe("buildOrchestratorPrompt", () => {
     expect(p).toMatch(/sin datos de cuota/i);
   });
 
+  it("refleja el reparto Opus/Sonnet/Haiku y la excepción de una línea", () => {
+    const p = buildOrchestratorPrompt({ agents, quota: null, now: NOW_MS });
+    expect(p).toMatch(/asistente \(Haiku\).*web.*navegador/s);
+    expect(p).toMatch(/programador \(Sonnet\) escribe código y tests/);
+    expect(p).toMatch(/una línea ya decidido.*directo/s);
+  });
+
   it("pide ahorrar Opus cuando la cuota está alta", () => {
     const quota = { fiveHour: { utilization: 0.8, resetsAt: 1_792_003_600 }, sevenDay: { utilization: 0.3, resetsAt: 1_792_500_000 } };
     const p = buildOrchestratorPrompt({ agents, quota, now: NOW_MS });
@@ -93,6 +100,9 @@ Haces tareas acotadas.
     expect(agents.asistente.model).toBe("haiku");
     expect(agents.programador.model).toBe("sonnet");
     expect(agents.asistente.prompt.length).toBeGreaterThan(50);
+    // Web y navegador: forma documentada (comodín por servidor MCP).
+    expect(agents.asistente.tools).toEqual(expect.arrayContaining(["WebSearch", "WebFetch", "mcp__claude-in-chrome__*", "mcp__chrome-devtools__*"]));
+    expect(agents.asistente.description).toMatch(/buscar en la web.*probar webs y apps en navegador o simulador/);
   });
 
   it("monta el objeto para --agents", () => {

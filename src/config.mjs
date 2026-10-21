@@ -186,7 +186,7 @@ export function loadConfig(processEnv = process.env, { exists = existsSync, read
     maxBudgetUsd: Number.isFinite(budget) ? budget : null,
     claudeBin: env.CLAUDE_BIN || "claude",
     // Subagentes que el hook PreToolUse deniega (heredan Opus). Vacío = desactivado.
-    blockedAgents: (env.ROUTER_BLOCKED_AGENTS ?? "general-purpose,fork").split(",").map((s) => s.trim()).filter(Boolean),
+    blockedAgents: (env.ROUTER_BLOCKED_AGENTS ?? "general-purpose,fork,claude,Explore,Plan").split(",").map((s) => s.trim()).filter(Boolean),
     layaRouting,
     // Modelo (nombre registrado en laya-serve) solo para la consulta de enrutado de encargos; vacío = el modelo actual.
     layaRoutingModel: env.ROUTER_LAYA_ROUTING_MODEL || "",

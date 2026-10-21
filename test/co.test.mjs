@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createSessions } from "../src/core/sessions.mjs";
-import { buildCoSettings, coFunction, withZshBlock, withoutZshBlock, launchAgentPlist, layaLaunchAgentPlist, layaInstallPlan, layaServiceSpec, serverServiceSpec, pickPython, parsePythonVersion, LAYA_VERSION, ZSH_START } from "../src/core/install.mjs";
+import { buildCoSettings, coFunction, withZshBlock, withoutZshBlock, launchAgentPlist, layaLaunchAgentPlist, layaInstallPlan, layaServiceSpec, planStatuslineChain, serverServiceSpec, pickPython, parsePythonVersion, LAYA_VERSION, ZSH_START } from "../src/core/install.mjs";
 import { systemdUnit } from "../src/core/platform/linux.mjs";
 import { loadConfig } from "../src/config.mjs";
 import { parseCliArgs } from "../src/core/cli.mjs";
@@ -187,8 +187,20 @@ describe("instalador", () => {
 
   it("deja escribir a los subagentes en sus worktrees sin preguntar (solo en sesiones co)", () => {
     const allow = buildCoSettings(paths).permissions.allow;
-    expect(allow).toEqual(expect.arrayContaining(["Edit(**/.claude/worktrees/**)", "Write(**/.claude/worktrees/**)"]));
+    expect(allow).toEqual(["Edit(**/.claude/worktrees/**)"]);
+    expect(allow.some((r) => r.startsWith("Write("))).toBe(false);
     expect(allow.every((r) => r.includes(".claude/worktrees/"))).toBe(true);
+  });
+
+  it("planStatuslineChain: respeta un statusline-next existente y informa de la encadenada", () => {
+    expect(planStatuslineChain({ userCmd: "node /x/mia.js", existingNext: "sh /h/statusline-chain.sh\n" }))
+      .toEqual({ write: false, chained: "sh /h/statusline-chain.sh" });
+    expect(planStatuslineChain({ userCmd: "node /x/mia.js", existingNext: "" })).toEqual({ write: true, chained: "node /x/mia.js" });
+    expect(planStatuslineChain({ userCmd: "node /x/mia.js", existingNext: "  \n" })).toEqual({ write: true, chained: "node /x/mia.js" });
+    expect(planStatuslineChain({ userCmd: "node /x/mia.js", existingNext: null })).toEqual({ write: true, chained: "node /x/mia.js" });
+    expect(planStatuslineChain({ userCmd: "node /r/bin/router-statusline.mjs", existingNext: null })).toEqual({ write: false, chained: null });
+    expect(planStatuslineChain({ userCmd: undefined, existingNext: null })).toEqual({ write: false, chained: null });
+    expect(planStatuslineChain({ userCmd: undefined, existingNext: "sh a.sh" })).toEqual({ write: false, chained: "sh a.sh" });
   });
 
   it("añade el alias co a .zshrc una sola vez y lo puede quitar", () => {

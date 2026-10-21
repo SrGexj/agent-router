@@ -192,3 +192,9 @@ export function fmtTokenTypes(t) {
   if (!t) return "";
   return `entrada ${fmtTokens(t.input)} · salida ${fmtTokens(t.output)} · lectura de caché ${fmtTokens(t.cacheRead)} · escritura de caché ${fmtTokens(t.cacheWrite)}`;
 }
+
+// Tooltip de la barra de uso: tokens totales por modelo y, aparte, los nuevos (sin lectura de caché).
+export function usageTitle(uso) {
+  const row = (label, k) => `${label} ${fmtTokens(uso.tokens[k])} (nuevos ${fmtTokens(uso.fresh[k])})`;
+  return `Reparto de tokens (entrada + salida + caché leída + caché escrita), orquestador incluido. ${row("Opus", "opus")} · ${row("Sonnet", "sonnet")} · ${row("Haiku", "haiku")}. «Nuevos» = sin caché leída.`;
+}

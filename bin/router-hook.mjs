@@ -188,7 +188,11 @@ try {
     const a = await agentUsageOf(agentTranscriptPath(payload), session.agentUsage?.[payload.agent_id]?.state);
     if (a) ctx.agentLive = a;
   }
-  const closes = CLOSING.has(payload.hook_event_name) || (payload.hook_event_name === "Stop" && (payload.background_tasks ?? []).length === 0);
+  if (payload.hook_event_name === "Stop" && session.runId && (payload.background_tasks ?? []).length > 0) {
+    const run = reduceEvents(await store.readRun(session.runId));
+    ctx.runningTasks = Object.values(run?.tasks ?? {}).filter((t) => t.status === "running").length;
+  }
+  const closes = CLOSING.has(payload.hook_event_name) || (payload.hook_event_name === "Stop" && ((payload.background_tasks ?? []).length === 0 || ctx.runningTasks === 0));
   const now = Date.now();
   if ((closes && session.runId) || liveUsageDue(payload, session, now)) {
     const o = await orchestratorUsageOf(payload.transcript_path, session);

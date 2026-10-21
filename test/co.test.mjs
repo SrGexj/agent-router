@@ -344,6 +344,7 @@ describe("bin/router-hook.mjs: preguntas y coste", () => {
     await runBin("bin/router-hook.mjs", { hook_event_name: "UserPromptSubmit", prompt: "x", session_id: sid, transcript_path: main });
     await writeFile(main, asst("viejo", "claude-opus-5-5", 999, 999) + asst("m1", "claude-opus-5-5", 10, 5) + asst("m1", "claude-opus-5-5", 10, 6) + asst("s1", "claude-sonnet-5-5", 1, 1, { isSidechain: true }));
     await writeFile(agent, asst("a1", "claude-sonnet-5-5", 7, 3, { isSidechain: true }) + "{roto");
+    await runBin("bin/router-hook.mjs", { hook_event_name: "SubagentStart", agent_id: "a1", agent_type: "programador", session_id: sid, transcript_path: main });
     await runBin("bin/router-hook.mjs", { hook_event_name: "SubagentStop", agent_id: "a1", agent_transcript_path: agent, last_assistant_message: "hecho", session_id: sid, transcript_path: main });
     await runBin("bin/router-hook.mjs", { hook_event_name: "Stop", background_tasks: [], session_id: sid, transcript_path: main });
     const run = reduceEvents(await events());

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { runTitle, promptParts, costBreakdown, aggregateSavings, spendShare, taskRows, isWaiting, normalizeText, groupRuns, filterRuns, filterTasks, actualRoute, shadowVerdict, aggregateShadow, aggregateSavingsByProfile, aggregateShadowByProfile, runTotals, trainingLabel, trainingSummary, classifierName, spendByFamily, spendUnknown } from "../src/core/details.mjs";
-import { fmtTokens } from "../dashboard/src/captions.js";
+import { runTitle, promptParts, costBreakdown, aggregateSavings, spendShare, taskRows, isWaiting, normalizeText, groupRuns, filterRuns, filterTasks, actualRoute, shadowVerdict, aggregateShadow, aggregateSavingsByProfile, aggregateShadowByProfile, runTotals, trainingLabel, trainingSummary, classifierName, spendByFamily, spendUnknown, tokensByFamily, tokenShare } from "../src/core/details.mjs";
+import { fmtTokens, usageTitle } from "../dashboard/src/captions.js";
 
 const M = 1_000_000;
 const u = (input = 0, output = 0, cacheRead = 0, cacheWrite5m = 0, cacheWrite1h = 0) => ({ input, output, cacheRead, cacheWrite5m, cacheWrite1h });
@@ -544,5 +544,36 @@ describe("gasto por modelo real, no por rol", () => {
   });
   it("actualRoute: solo subagentes propios = lo llevó Opus", () => {
     expect(actualRoute(mkRun([explore(undefined)]))).toBe("opus");
+  });
+});
+
+describe("tokensByFamily y tokenShare (uso)", () => {
+  const run = () => mkRun([
+    task("programador", "claude-sonnet-5-5", { "claude-sonnet-5-5": u(100, 50, 800, 30, 20) }),
+    task("asistente", "claude-haiku-5-5", { "claude-haiku-5-5": u(10, 10, 0, 0, 0) })
+  ], { orchestratorUsage: { "claude-opus-5-5": u(100, 100, 600, 100, 0) } });
+  it("suma input+output+cacheRead+cacheWrite(5m+1h) por familia, y los nuevos sin cacheRead", () => {
+    expect(tokensByFamily(run())).toEqual({
+      opus: { total: 900, fresh: 300 }, sonnet: { total: 1000, fresh: 200 }, haiku: { total: 20, fresh: 20 }
+    });
+  });
+  it("reparte en % que suman 100 e incluye absolutos", () => {
+    const s = tokenShare(run());
+    expect(s).toMatchObject({ opus: 47, sonnet: 52, haiku: 1 });
+    expect(s.opus + s.sonnet + s.haiku).toBe(100);
+    expect(s.tokens).toEqual({ opus: 900, sonnet: 1000, haiku: 20 });
+    expect(s.fresh).toEqual({ opus: 300, sonnet: 200, haiku: 20 });
+  });
+  it("un Explore en Opus cuenta como Opus; sin usage devuelve null", () => {
+    const r = mkRun([task("propio", "claude-opus-5-5", { "claude-opus-5-5": u(10) }, { agent: "Explore" })]);
+    expect(tokenShare(r)).toMatchObject({ opus: 100, sonnet: 0, haiku: 0 });
+    expect(tokenShare(mkRun([task("programador", null, undefined)]))).toBeNull();
+    expect(tokenShare(null)).toBeNull();
+  });
+  it("usageTitle muestra totales y nuevos por modelo", () => {
+    const t = usageTitle({ tokens: { opus: 1500, sonnet: 2000, haiku: 5 }, fresh: { opus: 300, sonnet: 200, haiku: 5 } });
+    expect(t).toContain("Opus 1,5 k (nuevos 300)");
+    expect(t).toContain("Sonnet 2 k (nuevos 200)");
+    expect(t).toContain("Haiku 5 (nuevos 5)");
   });
 });

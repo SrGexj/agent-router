@@ -80,11 +80,12 @@ export function closeInterrupted(session, now, usage = null) {
   return { runId: session.runId, events: cancelEvents(now, usage), session: { runId: null, lastRunId: session.runId, seq: session.seq } };
 }
 
-// Gasto del orquestador en vivo: PostToolUse del orquestador y SubagentStop, como mucho una vez cada 20 s por sesión.
+// Gasto del orquestador en vivo: PostToolUse del orquestador, PreToolUse al delegar (Agent/Task) y SubagentStop,
+// como mucho una vez cada 20 s por sesión. Un run nuevo parte de sesión limpia (sin lastUsageAt), así que su primer volcado no espera.
 export const LIVE_USAGE_MS = 20_000;
 export function liveUsageDue(p, session, now) {
   if (!session.runId || session.transcriptOffset == null) return false;
-  const eligible = p.hook_event_name === "SubagentStop" || (p.hook_event_name === "PostToolUse" && !p.agent_id);
+  const eligible = p.hook_event_name === "SubagentStop" || (!p.agent_id && (p.hook_event_name === "PostToolUse" || (p.hook_event_name === "PreToolUse" && AGENT_TOOLS.has(p.tool_name))));
   return eligible && now - (session.lastUsageAt ?? 0) >= LIVE_USAGE_MS;
 }
 
@@ -199,7 +200,9 @@ export function translateHook(p, session, now, makeRunId, ctx = {}) {
     case "PermissionDenied":
       return keep([{ type: "error", kind: "permission", message: `${p.tool_name ?? "Herramienta"} denegado`, t }]);
     case "Stop":
-      if ((p.background_tasks ?? []).length > 0) return keep([{ type: "thinking", taskId: null, text: "", t }]);
+      // Tareas en segundo plano que no son subagentes del run (shells, monitores) no dejan la ejecución abierta:
+      // sin subagentes en marcha la sesión queda parada esperando al usuario. Sin dato (ctx.runningTasks) se asume que sí hay.
+      if ((p.background_tasks ?? []).length > 0 && (ctx.runningTasks ?? 1) > 0) return keep([{ type: "thinking", taskId: null, text: "", t }]);
       return close([{ type: "run_end", exitCode: 0, t }]);
     case "StopFailure": {
       const err = p.error === "rate_limit"

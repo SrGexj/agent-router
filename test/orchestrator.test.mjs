@@ -38,7 +38,9 @@ describe("buildOrchestratorPrompt", () => {
     expect(p).toMatch(/mismos archivos/);
     // Todo lo que entra en el contexto del orquestador se relee (lectura de caché) en cada paso siguiente.
     expect(p).toMatch(/contexto/);
-    expect(p).toMatch(/informe corto/i);
+    expect(p).toMatch(/informe corto en frases telegráficas/i);
+    expect(p).toMatch(/Cierra solo con lo pendiente o las dudas/);
+    expect(p).not.toMatch(/Termina con un resumen corto/);
     // Escribir la memoria con Bash (cat >>) pide permiso siempre; con Edit/Write lo cubre la regla de ajustes.
     expect(p).toMatch(/memoria.*Edit.*Write.*nunca con Bash/is);
     expect(p).toMatch(/sin datos de cuota/i);

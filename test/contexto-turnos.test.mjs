@@ -3,7 +3,6 @@ import { advanceContext, startContext } from "../src/core/context.mjs";
 import { translateHook } from "../src/core/hooks.mjs";
 import { reduceEvents } from "../src/core/reducer.mjs";
 import { runContext } from "../src/core/compaction.mjs";
-import { loadConfig } from "../src/config.mjs";
 
 const asst = (id, usage, extra = {}, model = "claude-opus-5-5") =>
   JSON.stringify({ type: "assistant", timestamp: "2026-10-15T10:00:00.000Z", message: { id, model, usage, content: [] }, ...extra }) + "\n";
@@ -74,38 +73,5 @@ describe("context en los hooks y en el reducer", () => {
     ]);
     expect(run.context).toMatchObject({ tokens: 5000, turn: 2, window: 1_000_000 });
     expect(runContext(run).tokens).toBe(5000);
-  });
-});
-
-describe("umbral de aviso del contexto en config", () => {
-  it("por defecto 120000 tokens y configurable por ROUTER_CONTEXT_WARN_TOKENS", () => {
-    const quiet = { exists: () => false, readFile: () => { throw Object.assign(new Error(), { code: "ENOENT" }); }, warn: () => {} };
-    expect(loadConfig({ HOME: "/h" }, quiet).contextWarnTokens).toBe(120_000);
-    expect(loadConfig({ HOME: "/h", ROUTER_CONTEXT_WARN_TOKENS: "90000" }, quiet).contextWarnTokens).toBe(90_000);
-    expect(loadConfig({ HOME: "/h", ROUTER_CONTEXT_WARN_TOKENS: "abc" }, quiet).contextWarnTokens).toBe(120_000);
-    expect(loadConfig({ HOME: "/h", ROUTER_CONTEXT_WARN_TOKENS: "-5" }, quiet).contextWarnTokens).toBe(120_000);
-  });
-});
-
-describe("aviso del contexto de la ejecución en curso", () => {
-  const running = (tokens) => ({ status: "running", context: { tokens, model: "claude-opus-5-5", t: 1 } });
-
-  it("contextWatch: tokens actuales, umbral y si lo supera", async () => {
-    const { contextWatch } = await import("../src/core/compaction.mjs");
-    expect(contextWatch(running(100_000), 120_000)).toEqual({ tokens: 100_000, warnTokens: 120_000, over: false, pct: 83 });
-    expect(contextWatch(running(120_000), 120_000)).toMatchObject({ over: true, pct: 100 });
-    expect(contextWatch(running(300_000), 120_000)).toMatchObject({ over: true, pct: 250 });
-  });
-
-  it("sin contexto (ejecuciones antiguas) o sin umbral válido no hay aviso", async () => {
-    const { contextWatch } = await import("../src/core/compaction.mjs");
-    expect(contextWatch({ status: "running" }, 120_000)).toBeNull();
-    expect(contextWatch(null, 120_000)).toBeNull();
-    expect(contextWatch(running(5), 0)).toBeNull();
-  });
-
-  it("solo avisa en una ejecución en curso: terminada, over es false", async () => {
-    const { contextWatch } = await import("../src/core/compaction.mjs");
-    expect(contextWatch({ ...running(500_000), status: "completed" }, 120_000)).toMatchObject({ over: false });
   });
 });

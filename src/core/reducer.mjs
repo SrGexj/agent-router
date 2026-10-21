@@ -53,7 +53,7 @@ export function reduceRun(run, ev) {
       status: "running", startedAt: ev.t, endedAt: null, exitCode: null,
       mainModel: null, orchestratorActiveAt: null, lastText: "",
       tasks: {}, taskOrder: [], pending: [], quota: null, usage: null, orchestratorUsage: null, errors: [], limit: null,
-      waiting: null, asked: [], shadow: null, blockedCount: 0, layaDecisions: 0, layaApplied: 0, updatedAt: ev.t
+      waiting: null, asked: [], shadow: null, blockedCount: 0, directEdits: ev.directEdits ?? 0, layaDecisions: 0, layaApplied: 0, updatedAt: ev.t
     };
   }
   if (!run) return null;
@@ -84,6 +84,9 @@ export function reduceRun(run, ev) {
           ...(ev.escalated ? { escalated: true } : {})
         }]
       };
+    case "direct_edit":
+      // Total acumulado de la sesión (los hooks son procesos sueltos: lo cuenta el hook y lo lleva el evento).
+      return { ...base, directEdits: ev.n ?? (base.directEdits ?? 0) + 1 };
     case "task_blocked":
       return { ...base, blockedCount: (base.blockedCount ?? 0) + 1 };
     case "laya_decision":
@@ -173,9 +176,14 @@ export function reduceRun(run, ev) {
       // Los eventos por turno (del transcript) llevan `turn`: uno ya visto no cambia nada (releer no duplica ni retrocede).
       if (ev.turn != null && ev.turn <= (run.context?.turn ?? 0)) return run;
       const turn = ev.turn ?? run.context?.turn;
+      // El umbral de relevo lo trae la statusline; los eventos del transcript no lo llevan y conservan el último conocido.
+      const relevoAt = ev.relevoAt > 0 ? ev.relevoAt : run.context?.relevoAt;
       return {
         ...base,
-        context: { tokens: ev.tokens, model: ev.model ?? null, window: ev.window ?? run.context?.window ?? null, ...(turn != null ? { turn } : {}), t: ev.t }
+        context: {
+          tokens: ev.tokens, model: ev.model ?? null, window: ev.window ?? run.context?.window ?? null,
+          ...(relevoAt > 0 ? { relevoAt } : {}), ...(turn != null ? { turn } : {}), t: ev.t
+        }
       };
     }
     case "compact_stats": {

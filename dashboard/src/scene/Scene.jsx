@@ -4,6 +4,7 @@ import { workerView } from "../../../src/core/view.mjs";
 import { spendShare, tokenShare, isWaiting } from "../../../src/core/details.mjs";
 import { runContext, runBusy, contextAdvice } from "../../../src/core/compaction.mjs";
 import { fmtDuration, usageTitle, layaNode, orchestratorSub, ownSubagentsLine, spendPending, workerSub } from "../captions.js";
+import { directEditsLine } from "../../../src/core/delegar.mjs";
 
 export const VB = { w: 960, h: 548 };
 
@@ -184,7 +185,7 @@ export default function Scene({ run, phase, now, packets }) {
   const share = spendShare(run);
   const uso = tokenShare(run);
   const ctx = runContext(run);
-  const advice = ctx ? contextAdvice(ctx.pct, runBusy(run, now)) : null;
+  const advice = ctx ? contextAdvice(ctx.pct, runBusy(run, now), ctx.relevo) : null;
   const manual = run?.mode === "manual";
 
   const spin = !live ? "off" : ["recibe", "analiza", "delega", "revisa"].includes(phase) ? "fast" : "slow";
@@ -210,6 +211,7 @@ export default function Scene({ run, phase, now, packets }) {
   const P = { pill: workerPill(prog, run?.endedAt != null), sub: workerSub(run, "programador", "Sonnet") };
   const orqSub = orchestratorSub(run);
   const ownLine = ownSubagentsLine(run);
+  const directLine = directEditsLine(run);
   const laya = layaNode(run, now);
   const spendNote = spendPending(run, share);
 
@@ -258,7 +260,8 @@ export default function Scene({ run, phase, now, packets }) {
         <Label x={N.orq.x} y={N.orq.y + 76}><Pill dot={orqPill.dot}>{orqPill.text}</Pill></Label>
         {orqSub && <Label x={N.orq.x} y={N.orq.y + 98} className="sub orq-sub">{orqSub}</Label>}
         {ownLine && <Label x={N.orq.x} y={N.orq.y + (orqSub ? 118 : 98)} className="sub orq-own">{ownLine}</Label>}
-        <div className="split" style={{ left: pctX(N.orq.x), top: pctY(N.orq.y + 98 + (orqSub ? 22 : 0) + (ownLine ? 20 : 0)) }} title={share ? "Reparto del gasto real en dólares (precios API), orquestador incluido" : "Sin datos de uso todavía"}>
+        {directLine && <Label x={N.orq.x} y={N.orq.y + 98 + (orqSub ? 20 : 0) + (ownLine ? 20 : 0)} className="sub orq-direct">{directLine}</Label>}
+        <div className="split" style={{ left: pctX(N.orq.x), top: pctY(N.orq.y + 98 + (orqSub ? 22 : 0) + (ownLine ? 20 : 0) + (directLine ? 20 : 0)) }} title={share ? "Reparto del gasto real en dólares (precios API), orquestador incluido" : "Sin datos de uso todavía"}>
           <div className="split-cap">gasto</div>
           <div className="bar">
             <span className="seg opus" style={{ width: `${share?.opus ?? 0}%` }} />
@@ -288,11 +291,11 @@ export default function Scene({ run, phase, now, packets }) {
             </div>
           )}
           {ctx && (
-            <div className={`split-ctx ${ctx.level}`} title={`Contexto actual: ${ctx.tokens.toLocaleString("es-ES")} tokens de ${(ctx.limit ?? ctx.window).toLocaleString("es-ES")}`}>
+            <div className={`split-ctx ${advice.level === "relevo" ? "relevo" : ctx.level}`} title={`Contexto actual: ${ctx.tokens.toLocaleString("es-ES")} tokens de ${(ctx.limit ?? ctx.window).toLocaleString("es-ES")}`}>
               <div className="bar"><span className="seg" style={{ width: `${Math.min(100, ctx.pct)}%` }} /></div>
               <div className="split-labels">
                 <span>Contexto <b>{ctx.pct}%</b></span>
-                {advice.text && <span className="ctx-warn">{advice.text}</span>}
+                {advice.text && <span className="ctx-warn">{advice.text}{advice.relevo && advice.level !== "relevo" ? " · relevo" : ""}</span>}
               </div>
             </div>
           )}

@@ -3,10 +3,9 @@ import { fmtClock, fmtCost, fmtCostFine, fmtDuration, fmtTokens, fmtModel, fmtTo
 import { truncate } from "./packets.js";
 import WindowLine from "./WindowLine.jsx";
 import { useProfileLabel } from "./profiles.js";
-import { useSettings } from "./settings.js";
 import { windowLine, savingsLines, shadowLines, quotaBadge } from "./compact.js";
 import { isStale } from "../../src/core/view.mjs";
-import { runContext, runBusy, contextAdvice, contextWatch, CONTEXT_HELP } from "../../src/core/compaction.mjs";
+import { runContext, runBusy, contextAdvice, CONTEXT_HELP, RELEVO_HELP } from "../../src/core/compaction.mjs";
 import { runTitle, promptParts, costBreakdown, shadowVerdict, trainingLabel, taskRows, isWaiting, groupRuns, filterRuns, filterTasks, classifierName } from "../../src/core/details.mjs";
 
 function Window({ kind, w, nowSec }) {
@@ -363,27 +362,22 @@ function Spend({ b }) {
 // Contexto actual y compactaciones, aparte del gasto: la llamada que resume no queda en el transcript, es una estimación.
 function Context({ run, b, now }) {
   const ctx = runContext(run);
-  const watch = contextWatch(run, useSettings().contextWarnTokens);
   const c = b.compactions;
   if (!ctx && !c) return null;
-  const advice = ctx ? contextAdvice(ctx.pct, runBusy(run, now)) : null;
+  const advice = ctx ? contextAdvice(ctx.pct, runBusy(run, now), ctx.relevo) : null;
   return (
     <div className="dblock">
       <h4>Contexto y compactaciones</h4>
       {ctx && (
-        <div className={`ctxrow ${ctx.level}`}>
+        <div className={`ctxrow ${advice.level === "relevo" ? "relevo" : ctx.level}`}>
           <div className="qrow"><span>Contexto actual</span><b>{ctx.pct} %</b></div>
           <div className={`qbar ${ctx.level === "ok" ? "" : ctx.level === "warn" ? "warn" : "err"}`}><span style={{ transform: `scaleX(${Math.min(1, ctx.pct / 100)})` }} /></div>
           <div className="qmeta">
             {fmtTokens(ctx.tokens)} de {fmtTokens(ctx.limit ?? ctx.window)} tok{ctx.limit ? ` (autocompact; ventana ${fmtTokens(ctx.window)})` : ""}
           </div>
-          {watch?.over && (
-            <p className="ctxwarn over" role="alert">
-              Contexto del orquestador por encima del umbral: {fmtTokens(watch.tokens)} de {fmtTokens(watch.warnTokens)} tok. Cada turno relee todo: conviene delegar o compactar.
-            </p>
-          )}
           {advice.text && <p className="ctxwarn">{advice.text[0].toUpperCase() + advice.text.slice(1)}</p>}
-          {advice.text && <p className="note">{CONTEXT_HELP}</p>}
+          {advice.text && advice.level !== "relevo" && <p className="note">{CONTEXT_HELP}</p>}
+          {advice.relevo && <p className="note">{RELEVO_HELP}</p>}
         </div>
       )}
       {c && (

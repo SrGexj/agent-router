@@ -263,7 +263,7 @@ describe("parser stream-json: idempotente y con el modelo real", () => {
 
 describe("compatibilidad con ejecuciones antiguas", () => {
   it("una ejecución sin attempt, error, model ni context sigue reduciéndose y las vistas no fallan", async () => {
-    const { contextWatch, runContext } = await import("../src/core/compaction.mjs");
+    const { runContext } = await import("../src/core/compaction.mjs");
     const { taskRows, costBreakdown } = await import("../src/core/details.mjs");
     const run = reduceEvents([
       { type: "run_start", runId: "r", task: "x", mode: "sesion", model: "opus", t: 1 },
@@ -274,7 +274,6 @@ describe("compatibilidad con ejecuciones antiguas", () => {
     ]);
     expect(run.tasks.a).toMatchObject({ status: "completed", description: "d", error: null });
     expect(run.tasks.a.attempt).toBeUndefined();
-    expect(contextWatch(run, 120_000)).toBeNull();
     expect(runContext(run)).toBeNull();
     expect(() => taskRows(run)).not.toThrow();
     expect(() => costBreakdown(run)).not.toThrow();

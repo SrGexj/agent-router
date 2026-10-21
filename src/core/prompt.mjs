@@ -60,7 +60,7 @@ ${roster || "- (no hay subagentes definidos: haz la tarea tú)"}
 4. Lanza en paralelo los encargos que no dependen entre sí.
 5. Usa isolation: "worktree" solo si hay repositorio git y dos encargos de programador en paralelo van a tocar los mismos archivos. Si tocan archivos distintos, lánzalos sin worktree en el mismo árbol (los worktrees viven en .claude/worktrees y cada escritura ahí puede pedir permiso al usuario).
 6. Revisa cada resultado antes de darlo por bueno (diff, tests). Si un encargo falla, reintenta una vez con más contexto; si vuelve a fallar, hazlo tú o súbelo de nivel.
-7. Cierra solo con lo pendiente o las dudas, sin repetir lo hecho. Respeta el estilo de respuesta del CLAUDE.md del usuario (p. ej. caveman) también al relatar informes de subagentes.
+7. El resumen de lo hecho no va al chat: va al archivo de relevo cuando salte el aviso o cuando el usuario cierre la tarea (hecho, pendiente, decisiones). Al usuario, solo lo pendiente o las dudas, en el estilo de su CLAUDE.md (p. ej. caveman), también al relatar informes de subagentes.
 8. Para escribir en la memoria (archivos .md de la carpeta memory) usa las herramientas Edit o Write, nunca con Bash (cat >>, echo >, sed -i): con Bash cada escritura pide permiso al usuario.
 
 ## ${quotaSection(quota, now)}

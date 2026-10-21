@@ -167,7 +167,7 @@ describe("router --prompt", () => {
 });
 
 describe("instalador", () => {
-  const paths = { node: "/usr/local/bin/node", root: "/repo", home: "/home/user/.agent-router" };
+  const paths = { node: "/usr/local/bin/node", appRoot: "/repo", home: "/home/user/.agent-router" };
 
   it("los hooks de co apuntan al script de hooks y la statusline al envoltorio", () => {
     const s = buildCoSettings(paths);
@@ -255,7 +255,7 @@ describe("instalador", () => {
 
 describe("especificación de servicios", () => {
   it("el servidor: node + server/index.mjs, ROUTER_HOME primero y log en home", () => {
-    expect(serverServiceSpec({ label: "l", node: "/n", root: "/r", home: "/h", env: { X: "1" } })).toEqual({ label: "l", argv: ["/n", "/r/server/index.mjs"], cwd: "/r", env: { ROUTER_HOME: "/h", X: "1" }, logFile: "/h/server.log" });
+    expect(serverServiceSpec({ label: "l", node: "/n", appRoot: "/r", home: "/h", env: { X: "1" } })).toEqual({ label: "l", argv: ["/n", "/r/server/index.mjs"], cwd: "/r", env: { ROUTER_HOME: "/h", X: "1" }, logFile: "/h/server.log" });
   });
   it("Laya: atada a host:puerto y con su log", () => {
     const s = layaServiceSpec({ label: "l", serveBin: "/v/bin/laya-serve", home: "/h", host: "127.0.0.1", port: 4318 });

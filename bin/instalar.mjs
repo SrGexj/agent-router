@@ -1,14 +1,18 @@
 #!/usr/bin/env node
 // Instala (o con --desinstalar, quita) el alias `co`, los subagentes genéricos, el comando
 // `router` y el servidor del dashboard como servicio de usuario (launchd en macOS, systemd --user en Linux).
-// Hace copia de lo que modifica y no pisa archivos que no sean suyos.
-import { execFileSync, spawnSync } from "node:child_process";
+// Hooks, statusline, server y enlaces apuntan a la copia estable <home>/app (worktree de main), no a este repo.
+// --actualizar: pasa la copia a la punta de main y reinicia el server (`router actualizar`). Hace copia de lo que
+// modifica y no pisa archivos que no sean suyos.
+import { spawnSync } from "node:child_process";
 import { existsSync, lstatSync, readlinkSync } from "node:fs";
 import { copyFile, mkdir, readFile, rename, symlink, unlink, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadConfig, saveConfigEnv } from "../src/config.mjs";
 import { buildCoSettings, planStatuslineChain, layaInstallPlan, layaServiceSpec, pickPython, serverServiceSpec, withZshBlock as withShellBlock, withoutZshBlock as withoutShellBlock } from "../src/core/install.mjs";
+import { appPaths, appRootFor, planAppRemove, planLink } from "../src/core/app-copy.mjs";
+import { syncApp } from "../src/core/app-sync.mjs";
 import { realDeps, selectPlatform } from "../src/core/platform/index.mjs";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url)).replace(/\/$/, "");
@@ -24,6 +28,11 @@ const platform = selected.platform;
 const node = process.execPath;
 const stamp = new Date().toISOString().replace(/[:.]/g, "-");
 const uninstall = process.argv.includes("--desinstalar");
+const update = process.argv.includes("--actualizar");
+const reapply = process.argv.includes("--reaplicar"); // interno: segunda fase de --actualizar, ya con el código nuevo
+const APP = appRootFor(config.home);
+const appFiles = appPaths(APP);
+const run = (cmd, args, cwd) => spawnSync(cmd, args, { cwd, encoding: "utf8" });
 
 const paths = {
   settings: join(config.home, "co-settings.json"),
@@ -31,27 +40,68 @@ const paths = {
   rc: platform.shellRcPath(),
   layaVenv: join(config.home, "laya-venv"),
   routerBin: join(H, "bin/router"),
-  agents: ["asistente", "programador"].map((n) => ({ link: join(H, ".claude/agents", `${n}.md`), target: join(ROOT, "src/agents", `${n}.md`) }))
+  agents: ["asistente", "programador"].map((n) => ({ link: join(H, ".claude/agents", `${n}.md`), target: appFiles.agent(n), legacy: [join(ROOT, "src/agents", `${n}.md`)] }))
 };
+// Destinos antiguos (el repo de desarrollo) que se migran a la copia al reinstalar y que el desinstalador también reconoce.
+const legacyRouter = [join(ROOT, "bin/router.mjs")];
 
 const log = (msg) => console.log(`  ${msg}`);
-const isLinkTo = (p, target) => { try { return lstatSync(p).isSymbolicLink() && readlinkSync(p) === target; } catch { return false; } };
 const exists = (p) => { try { lstatSync(p); return true; } catch { return false; } };
 
-async function linkSafe(link, target, { backupForeign = false } = {}) {
-  if (isLinkTo(link, target)) return log(`ya enlazado: ${link}`);
-  if (exists(link)) {
-    if (!backupForeign) return log(`OMITIDO (ya existe y no es mío): ${link}`);
+const currentLink = (p) => { try { return lstatSync(p).isSymbolicLink() ? { symlink: true, target: readlinkSync(p) } : { symlink: false }; } catch { return null; } };
+
+async function linkSafe(link, target, { backupForeign = false, legacyTargets = [] } = {}) {
+  const action = planLink({ current: currentLink(link), target, legacyTargets, backupForeign });
+  if (action === "keep") return log(`ya enlazado: ${link}`);
+  if (action === "skip") return log(`OMITIDO (ya existe y no es mío): ${link}`);
+  if (action === "replace") await unlink(link);
+  if (action === "backup") {
     await rename(link, `${link}.bak-${stamp}`);
     log(`copia del anterior: ${link}.bak-${stamp}`);
   }
   await mkdir(join(link, ".."), { recursive: true });
   await symlink(target, link);
-  log(`enlazado: ${link} → ${target}`);
+  log(`${action === "replace" ? "migrado a la copia estable" : "enlazado"}: ${link} → ${target}`);
 }
 
-async function unlinkIfMine(link, target) {
-  if (isLinkTo(link, target)) { await unlink(link); log(`quitado: ${link}`); }
+async function unlinkIfMine(link, targets) {
+  const cur = currentLink(link);
+  if (cur?.symlink && targets.includes(cur.target)) { await unlink(link); log(`quitado: ${link}`); }
+}
+
+// Repo que aloja el worktree de la copia: este repo, o (si se ejecuta desde la propia copia) el que indica su .git común.
+function repoRoot() {
+  if (ROOT !== APP) return ROOT;
+  const r = run("git", ["-C", APP, "rev-parse", "--path-format=absolute", "--git-common-dir"]);
+  return r.status === 0 ? join(r.stdout.trim(), "..") : ROOT;
+}
+
+// Deja <home>/app en la punta de main (la crea si falta). Devuelve false y avisa si no se puede.
+function ensureApp() {
+  log("copia estable: " + APP);
+  const res = syncApp({ appRoot: APP, repoRoot: repoRoot(), run, exists, log: (m) => log(`  ${m}`) });
+  if (!res.ok) { console.error(`\nERROR: ${res.reason}`); return false; }
+  if (!res.changed) log("copia estable al día");
+  return true;
+}
+
+// Piezas que dependen de la copia: settings de co, enlaces y servicio del dashboard. Las comparten co y cop.
+async function applyApp({ restart }) {
+  await writeFile(paths.settings, JSON.stringify(buildCoSettings({ node, appRoot: APP }), null, 2) + "\n");
+  log(`hooks y statusline de co: ${paths.settings}`);
+  for (const a of paths.agents) await linkSafe(a.link, a.target, { legacyTargets: a.legacy });
+  await linkSafe(paths.routerBin, appFiles.router, { backupForeign: true, legacyTargets: legacyRouter });
+  if (!restart) return;
+  const boot = await platform.serviceInstall(serverServiceSpec({ label: LABEL, node, appRoot: APP, home: config.home, env: serverEnv() }));
+  log(boot.ok ? `dashboard siempre activo: http://${config.host}:${config.port}` : `no se pudo cargar el servicio: ${boot.error}`);
+}
+
+// El servicio arranca con un PATH mínimo: se le pasa la ruta absoluta de claude-monitor si existe.
+function serverEnv() {
+  const monitorBin = spawnSync(platform.loginShell(), ["-lc", "command -v claude-monitor"], { encoding: "utf8" }).stdout?.trim().split("\n").pop();
+  const env = monitorBin?.startsWith("/") ? { ROUTER_MONITOR_BIN: monitorBin } : {};
+  if (!env.ROUTER_MONITOR_BIN) console.log("  aviso: claude-monitor no está en el PATH; el panel Consumo dirá cómo instalarlo");
+  return env;
 }
 
 // Laya local (modelo de decisión del modo sombra). Si algo falla avisa y sigue: el resto de la instalación no depende de él.
@@ -82,13 +132,7 @@ async function install() {
   const saved = saveConfigEnv({ home: config.home });
   if (saved.keys.length) log(`configuración en ${saved.path}${saved.changed ? "" : " (sin cambios)"}: ${saved.keys.join(", ")}`);
 
-  if (!existsSync(join(ROOT, "dashboard/dist/index.html"))) {
-    log("construyendo el dashboard…");
-    execFileSync("npm", ["run", "build"], { cwd: ROOT, stdio: "ignore" });
-  }
-
-  await writeFile(paths.settings, JSON.stringify(buildCoSettings({ node, root: ROOT }), null, 2) + "\n");
-  log(`hooks y statusline de co: ${paths.settings}`);
+  if (!ensureApp()) process.exit(1);
 
   let userCmd;
   try {
@@ -99,22 +143,17 @@ async function install() {
   if (chain.write) await writeFile(paths.next, chain.chained + "\n");
   log(chain.chained ? `Statusline encadenada: ${chain.chained}` : "sin statusline propia: co mostrará una mínima con la cuota");
 
-  for (const a of paths.agents) await linkSafe(a.link, a.target);
-  await linkSafe(paths.routerBin, join(ROOT, "bin/router.mjs"), { backupForeign: true });
+  await applyApp({ restart: false });
 
   const rc = existsSync(paths.rc) ? await readFile(paths.rc, "utf8") : "";
   if (rc) await copyFile(paths.rc, join(config.home, `${basename(paths.rc).replace(/^\./, "")}.bak-${stamp}`));
   const second = config.profiles.second;
-  const block = platform.shellBlock({ node, root: ROOT, home: config.home, port: config.port, profile2: second && existsSync(second.dir) ? { dir: second.dir, alias: second.alias, args: second.args } : null });
+  const block = platform.shellBlock({ node, appRoot: APP, home: config.home, port: config.port, profile2: second && existsSync(second.dir) ? { dir: second.dir, alias: second.alias, args: second.args } : null });
   await writeFile(paths.rc, withShellBlock(rc, block));
   log(`alias co en ${paths.rc} (copia en ${config.home}/${basename(paths.rc).replace(/^\./, "")}.bak-${stamp})`);
   if (!platform.shellKnown()) log(`aviso: tu shell (${config.shell || "desconocida"}) no es bash ni zsh; el alias se ha escrito en ${paths.rc}, cárgalo desde tu shell o usa bash/zsh`);
 
-  // El servicio arranca con un PATH mínimo: se le pasa la ruta absoluta de claude-monitor si existe.
-  const monitorBin = spawnSync(platform.loginShell(), ["-lc", "command -v claude-monitor"], { encoding: "utf8" }).stdout?.trim().split("\n").pop();
-  const env = monitorBin?.startsWith("/") ? { ROUTER_MONITOR_BIN: monitorBin } : {};
-  if (!env.ROUTER_MONITOR_BIN) console.log("  aviso: claude-monitor no está en el PATH; el panel Consumo dirá cómo instalarlo");
-  const boot = await platform.serviceInstall(serverServiceSpec({ label: LABEL, node, root: ROOT, home: config.home, env }));
+  const boot = await platform.serviceInstall(serverServiceSpec({ label: LABEL, node, appRoot: APP, home: config.home, env: serverEnv() }));
   log(boot.ok ? `dashboard siempre activo: http://${config.host}:${config.port}` : `no se pudo cargar el servicio: ${boot.error}`);
 
   await installLaya();
@@ -122,6 +161,21 @@ async function install() {
   console.log(`\nListo. Abre una terminal nueva (o \`source ${paths.rc}\`) y usa: co`);
   if (platform.name === "linux") console.log("Para que los servicios sigan activos sin sesión abierta: loginctl enable-linger $USER");
   console.log(`Si cambias de versión de Node con nvm, vuelve a ejecutar npm run instalar (usa ${node}).`);
+  console.log("Para llevar la copia estable a la última main sin reinstalar: router actualizar");
+}
+
+// Fase 1: mueve la copia a main. Fase 2 (proceso nuevo, con el código ya actualizado): settings, enlaces y reinicio.
+async function updateApp() {
+  console.log("Actualizando la copia estable…");
+  if (!ensureApp()) process.exit(1);
+  const r = spawnSync(node, [join(APP, "bin/instalar.mjs"), "--reaplicar"], { stdio: "inherit" });
+  process.exit(r.status ?? 1);
+}
+
+async function reapplyAndRestart() {
+  await applyApp({ restart: false });
+  const res = await platform.serviceRestart(LABEL);
+  log(res.ok ? "dashboard reiniciado con la copia nueva (las sesiones co en curso siguen con la anterior hasta que las cierres)" : `no se pudo reiniciar el dashboard (${res.error}); si no está instalado: npm run instalar`);
 }
 
 async function remove() {
@@ -137,10 +191,17 @@ async function remove() {
   }
   if ((await platform.serviceUninstall(LABEL)).removed) log("servicio del dashboard quitado");
   if ((await platform.serviceUninstall(LAYA_LABEL)).removed) log("servicio de Laya quitado (el venv y los pesos se quedan: borra a mano ~/.agent-router/laya-venv y ~/.agent-router/hf si no los quieres)");
-  for (const a of paths.agents) await unlinkIfMine(a.link, a.target);
-  await unlinkIfMine(paths.routerBin, join(ROOT, "bin/router.mjs"));
+  for (const a of paths.agents) await unlinkIfMine(a.link, [a.target, ...a.legacy]);
+  await unlinkIfMine(paths.routerBin, [appFiles.router, ...legacyRouter]);
   for (const p of [paths.settings, paths.next]) if (existsSync(p)) await unlink(p);
+  const appExists = exists(join(APP, ".git"));
+  const rm = planAppRemove({ appRoot: APP, repoRoot: repoRoot(), appExists, appClean: !appExists || run("git", ["-C", APP, "status", "--porcelain"]).stdout.trim() === "" });
+  if (!rm.ok) log(`AVISO: ${rm.reason}`);
+  for (const { cmd, args } of rm.steps) {
+    const r = run(cmd, args);
+    log(r.status === 0 ? `copia estable quitada: ${APP}` : `no se pudo quitar la copia estable (${r.stderr.trim().split("\n").pop()})`);
+  }
   console.log(`\nHecho. Las ejecuciones guardadas siguen en ${config.runsDir}.`);
 }
 
-await (uninstall ? remove() : install());
+await (uninstall ? remove() : update ? updateApp() : (reapply ? reapplyAndRestart() : install()));

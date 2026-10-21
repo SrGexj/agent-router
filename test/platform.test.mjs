@@ -100,7 +100,7 @@ describe("macOS (launchd)", () => {
     expect(d.calls).toEqual([["launchctl", "kickstart", "-k", "gui/501/a"]]);
   });
   it("la función co abre con `open`", () => {
-    const body = createPlatform("darwin", fakeDeps()).shellBlock({ node: "/n", root: "/r", home: "/h", port: 4317 });
+    const body = createPlatform("darwin", fakeDeps()).shellBlock({ node: "/n", appRoot: "/r", home: "/h", port: 4317 });
     expect(body).toContain('pgrep -qf "agent-router/co-settings.json" || open "http://127.0.0.1:4317"');
   });
 });
@@ -174,7 +174,7 @@ describe("Linux (systemd --user)", () => {
     expect(d.calls).toEqual([["systemctl", "--user", "restart", "a.service"]]);
   });
   it("la función co abre con xdg-open solo si existe", () => {
-    const body = createPlatform("linux", fakeDeps()).shellBlock({ node: "/n", root: "/r", home: "/h", port: 4317 });
+    const body = createPlatform("linux", fakeDeps()).shellBlock({ node: "/n", appRoot: "/r", home: "/h", port: 4317 });
     expect(body).toContain("xdg-open");
     expect(body).not.toContain(" open \"http");
   });
@@ -189,7 +189,7 @@ describe("Linux (systemd --user)", () => {
 });
 
 describe("bloque de shell (función co)", () => {
-  const base = { node: "/usr/local/bin/node", root: "/repo", home: "/home/u/.agent-router", port: 4317 };
+  const base = { node: "/usr/local/bin/node", appRoot: "/repo", home: "/home/u/.agent-router", port: 4317 };
   const variants = {
     darwin: createPlatform("darwin", fakeDeps()).shellBlock(base),
     linux: createPlatform("linux", fakeDeps()).shellBlock(base),

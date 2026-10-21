@@ -13,12 +13,17 @@ Opciones:
   --prompt             Imprime el prompt del orquestador con la cuota actual (lo usa el alias co).
   -h, --help           Esta ayuda.
 
+Copia estable:
+  router actualizar                           Pasa ~/.agent-router/app a la punta de main, reconstruye y reinicia el dashboard.
+
 Ajustar Laya con tus datos:
   router laya-datos [--out archivo.csv] [--perfil <id>|todos]   Exporta las ejecuciones etiquetadas (y un CSV de evaluación aparte).
   router laya-entrenar [--perfil P] [--forzar] [--simular]                  Exporta, ajusta Laya con laya-train y compara con el modelo base.
       [--datos CARPETA]   usa CARPETA/train.jsonl y test.jsonl en vez de las ejecuciones guardadas
       [--micro-batch N] [--grad-accum N] [--max-len N]   memoria (por defecto 1, 64 y 512)
   router laya-usar CARPETA | --quitar                                       Anota qué checkpoint usar y explica cómo aplicarlo.`;
+
+export const isActualizarCommand = (word) => word === "actualizar";
 
 const LAYA_COMMANDS = new Set(["laya-datos", "laya-entrenar", "laya-usar"]);
 export const isLayaCommand = (word) => LAYA_COMMANDS.has(word);

@@ -6,13 +6,13 @@ export const SHELL_END = "# <<< agent-router (co) <<<";
 export const dq = (s) => String(s).replace(/[\\"$`]/g, "\\$&");
 
 // openLine: la orden que abre el dashboard (la aporta cada plataforma). profile2: { dir, alias, args }.
-export function coFunction({ node, root, home, port = 4317, personalDir = null, alias = "cop", personalArgs = [], openLine = null }) {
+export function coFunction({ node, appRoot, home, port = 4317, personalDir = null, alias = "cop", personalArgs = [], openLine = null }) {
   const open = openLine ?? `open "http://127.0.0.1:${port}"`;
   const co = `# Claude Code en modo orquestador: Opus reparte entre asistente (Haiku) y programador (Sonnet).
 # La primera sesión co abre el dashboard; las siguientes no repiten pestaña.
 co() {
   pgrep -qf "agent-router/co-settings.json" || ${open}
-  command claude --append-system-prompt "$("${node}" "${root}/bin/router.mjs" --prompt)" --settings "${home}/co-settings.json" "$@"
+  command claude --append-system-prompt "$("${node}" "${appRoot}/bin/router.mjs" --prompt)" --settings "${home}/co-settings.json" "$@"
 }`;
   if (!personalDir) return co;
   return `${co}
@@ -40,8 +40,8 @@ export function withBlock(text, body) {
   return `${clean}${sep}\n${SHELL_START}\n${body}\n${SHELL_END}\n`;
 }
 
-// Cuerpo del bloque a partir de las opciones del instalador: { node, root, home, port, profile2: { dir, alias, args } | null }.
+// Cuerpo del bloque a partir de las opciones del instalador: { node, appRoot, home, port, profile2: { dir, alias, args } | null }.
 export function shellBlockFor(opts, openLine) {
-  const { node, root, home, port = 4317, profile2 = null } = opts;
-  return coFunction({ node, root, home, port, openLine, personalDir: profile2?.dir ?? null, alias: profile2?.alias, personalArgs: profile2?.args ?? [] });
+  const { node, appRoot, home, port = 4317, profile2 = null } = opts;
+  return coFunction({ node, appRoot, home, port, openLine, personalDir: profile2?.dir ?? null, alias: profile2?.alias, personalArgs: profile2?.args ?? [] });
 }

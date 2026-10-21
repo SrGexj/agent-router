@@ -16,8 +16,8 @@ const MATCHERS = { SessionStart: ["compact", "startup"] };
 
 const cmd = (node, script) => `"${node}" "${script}"`;
 
-export function buildCoSettings({ node, root }) {
-  const hook = cmd(node, `${root}/bin/router-hook.mjs`);
+export function buildCoSettings({ node, appRoot }) {
+  const hook = cmd(node, `${appRoot}/bin/router-hook.mjs`);
   const hooks = Object.fromEntries(HOOK_EVENTS.map((e) => [e, [MATCHERS[e] ?? ""].flat().map((matcher) => ({ matcher, hooks: [{ type: "command", command: hook, timeout: 5 }] }))]));
   return {
     hooks,
@@ -27,7 +27,7 @@ export function buildCoSettings({ node, root }) {
     // sin esto cada escritura pide permiso. Solo afecta a las sesiones co (este archivo va por --settings).
     permissions: { allow: ["Edit(**/.claude/worktrees/**)"] },
     // refreshInterval: Esc no dispara hooks; la statusline mira el transcript cada 2 s para cerrar la ejecución.
-    statusLine: { type: "command", command: cmd(node, `${root}/bin/router-statusline.mjs`), padding: 0, refreshInterval: 2 }
+    statusLine: { type: "command", command: cmd(node, `${appRoot}/bin/router-statusline.mjs`), padding: 0, refreshInterval: 2 }
   };
 }
 
@@ -41,8 +41,8 @@ export function planStatuslineChain({ userCmd, existingNext }) {
 }
 
 // Servicio del dashboard: spec neutra que cada plataforma convierte en plist o unit.
-export function serverServiceSpec({ label, node, root, home, env = {} }) {
-  return { label, argv: [node, `${root}/server/index.mjs`], cwd: root, env: { ROUTER_HOME: home, ...env }, logFile: `${home}/server.log` };
+export function serverServiceSpec({ label, node, appRoot, home, env = {} }) {
+  return { label, argv: [node, `${appRoot}/server/index.mjs`], cwd: appRoot, env: { ROUTER_HOME: home, ...env }, logFile: `${home}/server.log` };
 }
 
 // Solo macOS: se conserva por compatibilidad; el instalador usa serverServiceSpec con la plataforma.

@@ -22,15 +22,15 @@ const step = (cmd, args, cwd) => ({ cmd, args, ...(cwd && { cwd }) });
 // Pasos para dejar la copia en la punta de main. Hechos de entrada (los lee el instalador):
 //   appExists, appClean (git status vacío), appHead, mainHead (SHAs), distExists (dashboard/dist/index.html).
 // Si hay que mover el HEAD o falta el dist: npm ci completo (vite es devDependency), build y poda a producción.
-export function planAppSync({ appRoot, repoRoot, appExists, appClean, appHead, mainHead, distExists }) {
+export function planAppSync({ appRoot, repoRoot, appExists, appClean, appHead, mainHead, distExists, ref = MAIN_BRANCH }) {
   if (appExists && !appClean) {
     return { ok: false, steps: [], reason: `La copia estable ${appRoot} tiene cambios sin confirmar. No toques ahí: descártalos o confírmalos y vuelve a ejecutarlo.` };
   }
   const moves = !appExists || appHead !== mainHead;
   if (!moves && distExists) return { ok: true, steps: [], changed: false };
   const steps = [];
-  if (!appExists) steps.push(step("git", ["-C", repoRoot, "worktree", "add", "--detach", appRoot, MAIN_BRANCH]));
-  else if (moves) steps.push(step("git", ["-C", appRoot, "checkout", "--detach", MAIN_BRANCH]));
+  if (!appExists) steps.push(step("git", ["-C", repoRoot, "worktree", "add", "--detach", appRoot, ref]));
+  else if (moves) steps.push(step("git", ["-C", appRoot, "checkout", "--detach", ref]));
   steps.push(
     step("npm", ["ci", "--no-audit", "--no-fund"], appRoot),
     step("npm", ["run", "build"], appRoot),

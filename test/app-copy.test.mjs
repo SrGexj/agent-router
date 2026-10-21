@@ -168,4 +168,27 @@ describe("syncApp con git de verdad (npm doblado)", () => {
     mkdirSync(t.app, { recursive: true });
     expect(syncApp(opts(t)).ok).toBe(false);
   });
+
+  it("hace fetch y mueve la copia a origin/main (remoto bare); sin red, sigue con main local y avisa", () => {
+    const t = setup();
+    mkdirSync(join(t.base, "home"));
+    const bare = join(t.base, "remoto.git");
+    spawnSync("git", ["init", "-q", "--bare", "-b", "main", bare]);
+    sh(t.repo, "remote", "add", "origin", bare);
+    sh(t.repo, "push", "-q", "origin", "main");
+    expect(syncApp(opts(t)).ok).toBe(true);
+    // otro clon sube un commit a origin/main; el main local del repo no se mueve
+    const otro = join(t.base, "otro");
+    spawnSync("git", ["clone", "-q", bare, otro]);
+    sh(otro, "config", "user.email", "t@t"); sh(otro, "config", "user.name", "t");
+    writeFileSync(join(otro, "a.txt"), "remoto"); sh(otro, "commit", "-qam", "remoto"); sh(otro, "push", "-q", "origin", "main");
+    expect(syncApp(opts(t)).ok).toBe(true);
+    expect(readFileSync(join(t.app, "a.txt"), "utf8")).toBe("remoto");
+    expect(sh(t.repo, "show", "main:a.txt")).toBe("1");
+    // sin red: el remoto desaparece
+    sh(t.repo, "remote", "set-url", "origin", join(t.base, "no-existe.git"));
+    const logs = [];
+    expect(syncApp({ ...opts(t), log: (m) => logs.push(m) }).ok).toBe(true);
+    expect(logs.join("\n")).toContain("AVISO");
+  });
 });

@@ -54,7 +54,7 @@ Avisos:
 
 Los hooks, la statusline, el servicio del dashboard, los enlaces de los agentes y `~/bin/router` no apuntan a este repo sino a `~/.agent-router/app`: un `git worktree` de `main` en HEAD desatado, con sus `node_modules` de producción y el `dashboard/dist` ya construido. Así, cambiar de rama o dejar un merge a medias aquí no rompe las sesiones `co` y `cop` en marcha (las dos usan el mismo `co-settings.json` y la misma copia).
 
-- Actualizar a la punta de `main` local: `router actualizar` (o `npm run instalar -- --actualizar`). Mueve la copia, reconstruye y reinicia el dashboard. Antes haz `git pull` de `main` en tu repo si quieres lo último del remoto.
+- Actualizar a `origin/main` (hace `git fetch origin`; sin red usa el `main` local y avisa): `router actualizar` (o `npm run instalar -- --actualizar`). Mueve la copia, reconstruye y reinicia el dashboard.
 - No edites nada dentro de `~/.agent-router/app`: si tiene cambios sin confirmar, la actualización y la desinstalación paran y avisan.
 - Las sesiones `co` ya abiertas siguen con la copia anterior hasta que las cierres.
 

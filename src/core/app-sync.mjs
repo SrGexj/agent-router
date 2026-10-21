@@ -6,10 +6,14 @@ export function syncApp({ appRoot, repoRoot, run, exists, log = () => {} }) {
   const out = (cwd, ...args) => { const r = run("git", ["-C", cwd, ...args]); return r.status === 0 ? String(r.stdout ?? "").trim() : null; };
   const appExists = exists(join(appRoot, ".git"));
   if (!appExists && exists(appRoot)) return { ok: false, reason: `${appRoot} existe y no es un worktree de git: muévelo o bórralo y vuelve a ejecutarlo.` };
-  const mainHead = out(repoRoot, "rev-parse", "main");
+  // Destino: origin/main tras un fetch; sin red (o sin origin) se sigue con el main local y se avisa.
+  let ref = "main";
+  if (run("git", ["-C", repoRoot, "fetch", "origin"]).status === 0 && out(repoRoot, "rev-parse", "--verify", "-q", "origin/main")) ref = "origin/main";
+  else log("AVISO: no se pudo hacer fetch de origin; se usa el main local");
+  const mainHead = out(repoRoot, "rev-parse", ref);
   if (!mainHead) return { ok: false, reason: `No encuentro la rama main en ${repoRoot}.` };
   const plan = planAppSync({
-    appRoot, repoRoot, appExists, mainHead,
+    appRoot, repoRoot, appExists, mainHead, ref,
     appHead: appExists ? out(appRoot, "rev-parse", "HEAD") : null,
     appClean: !appExists || out(appRoot, "status", "--porcelain") === "",
     distExists: exists(join(appRoot, "dashboard/dist/index.html"))

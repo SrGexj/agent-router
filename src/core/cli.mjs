@@ -14,7 +14,7 @@ Opciones:
   -h, --help           Esta ayuda.
 
 Copia estable:
-  router actualizar                           Pasa ~/.agent-router/app a la punta de main, reconstruye y reinicia el dashboard.
+  router actualizar                           Pasa ~/.agent-router/app a origin/main (fetch), reconstruye y reinicia el dashboard.
 
 Ajustar Laya con tus datos:
   router laya-datos [--out archivo.csv] [--perfil <id>|todos]   Exporta las ejecuciones etiquetadas (y un CSV de evaluación aparte).

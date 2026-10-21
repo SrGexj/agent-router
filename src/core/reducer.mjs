@@ -43,6 +43,8 @@ function mergeByModel(a, b) {
 // subagentes en segundo plano (taskId) no cuenta: pueden seguir mientras la pregunta está abierta.
 const CLEARS_WAITING = new Set(["tool", "task_request", "thinking", "run_end"]);
 
+const ORPHAN_SKIP = new Set(["tool", "task_model", "task_stats", "task_end", "task_usage"]);
+
 export function reduceRun(run, ev) {
   if (!ev) return run;
   if (ev.type === "run_start") {
@@ -51,12 +53,16 @@ export function reduceRun(run, ev) {
       status: "running", startedAt: ev.t, endedAt: null, exitCode: null,
       mainModel: null, orchestratorActiveAt: null, lastText: "",
       tasks: {}, taskOrder: [], pending: [], quota: null, usage: null, orchestratorUsage: null, errors: [], limit: null,
-      waiting: null, asked: [], shadow: null, updatedAt: ev.t
+      waiting: null, asked: [], shadow: null, blockedCount: 0, layaDecisions: 0, layaApplied: 0, updatedAt: ev.t
     };
   }
   if (!run) return null;
   const cleared = (CLEARS_WAITING.has(ev.type) && !ev.taskId) || (ev.type === "error" && ev.kind === "permission");
   const base = { ...run, updatedAt: ev.t, ...(cleared ? { waiting: null } : {}) };
+
+  // Eventos de un subagente que no arrancó en esta ejecución (huérfanos: anteriores al run_start o al hook):
+  // no crean ni cuentan un encargo. El coste global llega por "usage", no por estos eventos.
+  if (ORPHAN_SKIP.has(ev.type) && ev.taskId && !(ev.taskId in run.tasks)) return base;
 
   switch (ev.type) {
     case "main_model":
@@ -78,9 +84,17 @@ export function reduceRun(run, ev) {
           ...(ev.escalated ? { escalated: true } : {})
         }]
       };
+    case "task_blocked":
+      return { ...base, blockedCount: (base.blockedCount ?? 0) + 1 };
+    case "laya_decision":
+      return { ...base, layaDecisions: (base.layaDecisions ?? 0) + 1, layaApplied: (base.layaApplied ?? 0) + (ev.applied ? 1 : 0) };
     case "task_start": {
       // Los hooks no traen la descripción en SubagentStart: se toma de la llamada a Agent pendiente. Si un hook reescribió
       // el subagent_type no coincide ninguna: se toma la más antigua y se anota qué agente se pidió.
+      // Reanudar un subagente conocido (mismo agent_id, p. ej. SendMessage) no es un encargo nuevo: vuelve a
+      // "running" conservando su descripción y sin gastar la llamada a Agent pendiente de otro encargo.
+      const prevTask = base.tasks[ev.taskId];
+      if (prevTask) return withTask(base, ev.taskId, { status: "running", startedAt: ev.t, endedAt: null });
       let { description, prompt } = ev;
       let pending = base.pending ?? [];
       let extra = {};

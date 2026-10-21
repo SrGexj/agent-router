@@ -6,6 +6,8 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createSessions } from "../src/core/sessions.mjs";
 import { buildCoSettings, coFunction, withZshBlock, withoutZshBlock, launchAgentPlist, layaLaunchAgentPlist, layaInstallPlan, layaServiceSpec, serverServiceSpec, pickPython, parsePythonVersion, LAYA_VERSION, ZSH_START } from "../src/core/install.mjs";
+import { systemdUnit } from "../src/core/platform/linux.mjs";
+import { loadConfig } from "../src/config.mjs";
 import { parseCliArgs } from "../src/core/cli.mjs";
 import { parseJsonl } from "../src/core/store.mjs";
 import { reduceEvents } from "../src/core/reducer.mjs";
@@ -247,6 +249,23 @@ describe("especificación de servicios", () => {
     const s = layaServiceSpec({ label: "l", serveBin: "/v/bin/laya-serve", home: "/h", host: "127.0.0.1", port: 4318 });
     expect(s).toMatchObject({ argv: ["/v/bin/laya-serve"], logFile: "/h/laya.log" });
     expect(s.env).toMatchObject({ LAYA_HOST: "127.0.0.1", LAYA_PORT: "4318", HF_HOME: "/h/hf" });
+    expect(s.env).not.toHaveProperty("LAYA_EXTRA_MODELS");
+  });
+  it("Laya: LAYA_EXTRA_MODELS desde la config, en el plist (darwin) y en la unidad (linux)", () => {
+    const extraModels = { encargos: "/m/modelo" };
+    const o = { label: "com.x.laya", serveBin: "/v/bin/laya-serve", home: "/h", host: "127.0.0.1", port: 4318, extraModels };
+    const spec = layaServiceSpec(o);
+    expect(spec.env.LAYA_EXTRA_MODELS).toBe(JSON.stringify(extraModels));
+    expect(spec.env.LAYA_MODELS).toBe("multilingual");
+    expect(layaLaunchAgentPlist(o)).toContain("LAYA_EXTRA_MODELS");
+    expect(systemdUnit(spec)).toContain("LAYA_EXTRA_MODELS=");
+  });
+  it("config: layaExtraModels y layaRoutingModel", () => {
+    const opts = { exists: () => false, readFile: () => { throw Object.assign(new Error(), { code: "ENOENT" }); } };
+    const c = loadConfig({ HOME: "/h", ROUTER_LAYA_EXTRA_MODELS: '{"encargos":"/m"}', ROUTER_LAYA_ROUTING_MODEL: "encargos" }, opts);
+    expect(c.layaExtraModels).toEqual({ encargos: "/m" });
+    expect(c.layaRoutingModel).toBe("encargos");
+    expect(() => loadConfig({ HOME: "/h", ROUTER_LAYA_EXTRA_MODELS: "[1]" }, opts)).toThrow(/ROUTER_LAYA_EXTRA_MODELS/);
   });
 });
 
@@ -325,6 +344,7 @@ describe("bin/router-hook.mjs: preguntas y coste", () => {
     await runBin("bin/router-hook.mjs", { hook_event_name: "UserPromptSubmit", prompt: "x", session_id: sid, transcript_path: main });
     await writeFile(main, asst("viejo", "claude-opus-5-5", 999, 999) + asst("m1", "claude-opus-5-5", 10, 5) + asst("m1", "claude-opus-5-5", 10, 6) + asst("s1", "claude-sonnet-5-5", 1, 1, { isSidechain: true }));
     await writeFile(agent, asst("a1", "claude-sonnet-5-5", 7, 3, { isSidechain: true }) + "{roto");
+    await runBin("bin/router-hook.mjs", { hook_event_name: "SubagentStart", agent_id: "a1", agent_type: "programador", session_id: sid, transcript_path: main });
     await runBin("bin/router-hook.mjs", { hook_event_name: "SubagentStop", agent_id: "a1", agent_transcript_path: agent, last_assistant_message: "hecho", session_id: sid, transcript_path: main });
     await runBin("bin/router-hook.mjs", { hook_event_name: "Stop", background_tasks: [], session_id: sid, transcript_path: main });
     const run = reduceEvents(await events());

@@ -38,8 +38,10 @@ export function createTailer() {
   return { read };
 }
 
-async function reducedRuns(store, limit) {
-  const ids = (await store.listRunIds()).slice(0, limit);
+async function reducedRuns(store, limit, session = null) {
+  let ids = await store.listRunIds();
+  if (session) ids = ids.filter((id) => id.split("-")[1] === session);
+  ids = ids.slice(0, limit);
   const runs = await Promise.all(ids.map(async (id) => reduceEvents(await store.readRun(id))));
   return runs.filter(Boolean);
 }
@@ -64,8 +66,13 @@ export function createApp({ store, monitor = null, profileLabels = {}, settings 
   app.get("/health", (_req, res) => res.json({ ok: true }));
 
   app.get("/api/runs", async (req, res) => {
-    const limit = Math.min(Math.max(Number(req.query.limit) || 30, 1), 200);
-    res.json({ runs: await reducedRuns(store, limit) });
+    const session = req.query.session;
+    if (session !== undefined && !(typeof session === "string" && /^[0-9a-f]{8}$/.test(session))) {
+      return res.status(400).json({ error: "session no válida" });
+    }
+    const max = session === undefined ? 200 : 1000;
+    const limit = Math.min(Math.max(Number(req.query.limit) || (session === undefined ? 30 : max), 1), max);
+    res.json({ runs: await reducedRuns(store, limit, session ?? null) });
   });
 
   app.get("/api/runs/:id", async (req, res) => {

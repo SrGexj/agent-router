@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { reduceRun, reduceEvents, nodeFor } from "../src/core/reducer.mjs";
+import { workerView } from "../src/core/view.mjs";
 
 const start = { type: "run_start", runId: "r1", task: "Añade validación", mode: "orquestado", model: "opus", cwd: "/x", t: 0 };
 
@@ -50,10 +51,53 @@ describe("reducer de una ejecución", () => {
     expect(run.tasks.a).toMatchObject({ status: "failed", endedAt: 60, summary: "tests en rojo", tokens: 900, toolUses: 4 });
   });
 
-  it("ignora un task_end sin task_start previo (en datos antiguos eran agentes internos de Claude Code)", () => {
+  it("un task_end huérfano (sin task_start en la ejecución) no crea ni cuenta un encargo", () => {
     const run = reduceEvents([start, { type: "task_end", taskId: "zz", status: "completed", summary: "", t: 5 }]);
     expect(run.tasks.zz).toBeUndefined();
     expect(run.taskOrder).toEqual([]);
+  });
+
+  it("los eventos huérfanos de uso, modelo o herramientas tampoco crean encargos", () => {
+    const run = reduceEvents([
+      start,
+      { type: "task_usage", taskId: "zz", byModel: {}, snapshot: true, t: 2 },
+      { type: "task_model", taskId: "zz", model: "claude-sonnet-5-5", t: 3 },
+      { type: "task_stats", taskId: "zz", model: "claude-sonnet-5-5", tokens: 5, t: 4 },
+      { type: "tool", taskId: "zz", name: "Read", t: 5 },
+      { type: "task_end", taskId: "zz", status: "completed", t: 6 }
+    ]);
+    expect(run.taskOrder).toEqual([]);
+    expect(workerView(run, "programador", 10).total).toBe(0);
+  });
+
+  it("reanudar el mismo subagente (mismo agent_id) no es un encargo nuevo", () => {
+    let run = reduceEvents([
+      start,
+      { type: "task_request", agent: "programador", description: "Validación", prompt: "p", t: 1 },
+      { type: "task_start", taskId: "a", agent: "programador", description: "", prompt: "", t: 2 },
+      { type: "task_end", taskId: "a", status: "completed", t: 3 }
+    ]);
+    for (let i = 0; i < 4; i++) {
+      run = reduceEvents([
+        { type: "task_start", taskId: "a", agent: "programador", description: "", prompt: "", t: 10 + i * 10 },
+        { type: "task_end", taskId: "a", status: "completed", t: 15 + i * 10 }
+      ], run);
+    }
+    expect(run.taskOrder).toEqual(["a"]);
+    expect(workerView(run, "programador", 100)).toMatchObject({ total: 1, done: 1, running: 0 });
+    expect(run.tasks.a.description).toBe("Validación");
+  });
+
+  it("al reanudar, vuelve a running y no consume el encargo pendiente de otro", () => {
+    const run = reduceEvents([
+      start,
+      { type: "task_start", taskId: "a", agent: "programador", description: "Uno", prompt: "p", t: 1 },
+      { type: "task_end", taskId: "a", status: "completed", t: 2 },
+      { type: "task_request", agent: "programador", description: "Dos", prompt: "q", t: 3 },
+      { type: "task_start", taskId: "a", agent: "programador", description: "", prompt: "", t: 4 }
+    ]);
+    expect(run.tasks.a).toMatchObject({ status: "running", description: "Uno" });
+    expect(run.pending).toHaveLength(1);
   });
 
   it("anota la última actividad del orquestador y de cada encargo", () => {
@@ -193,7 +237,7 @@ describe("resultado y coste en el reducer", () => {
   });
 
   it("task_usage se guarda y se fusiona si llegan varios", () => {
-    const run = reduceEvents([start, { type: "task_usage", taskId: "a", byModel: { m: um(1) }, t: 1 }, { type: "task_usage", taskId: "a", byModel: { m: um(2), n: um(5) }, t: 2 }]);
+    const run = reduceEvents([start, { type: "task_start", taskId: "a", agent: "programador", description: "", prompt: "", t: 0 }, { type: "task_usage", taskId: "a", byModel: { m: um(1) }, t: 1 }, { type: "task_usage", taskId: "a", byModel: { m: um(2), n: um(5) }, t: 2 }]);
     expect(run.tasks.a.usage).toEqual({ m: um(3), n: um(5) });
   });
 

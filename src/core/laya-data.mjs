@@ -71,8 +71,11 @@ export function toJsonl(rows) {
   return (rows ?? []).map((r) => JSON.stringify({ state: { body: r.text }, questions, expected: { route: r.label } })).join("\n") + "\n";
 }
 
-export function layaTrainArgs({ data, out, base, dryRun = false, textColumn = null, labelColumn = null }) {
+export function layaTrainArgs({ data, out, base, dryRun = false, textColumn = null, labelColumn = null, microBatch = null, gradAccum = null, maxLen = null }) {
   const args = ["--data", data, "--out", out, "--base", base];
+  if (microBatch) args.push("--micro-batch", String(microBatch));
+  if (gradAccum) args.push("--grad-accum", String(gradAccum));
+  if (maxLen) args.push("--max-len", String(maxLen));
   if (textColumn) args.push("--text-column", textColumn);
   if (labelColumn) args.push("--label-column", labelColumn);
   if (dryRun) args.push("--dry-run");
@@ -98,4 +101,12 @@ export function compareScores(base, nuevo) {
   if (base?.accuracy == null || nuevo?.accuracy == null) return { winner: "empate", delta: null };
   const delta = nuevo.accuracy - base.accuracy;
   return { winner: delta > 1e-9 ? "nuevo" : delta < -1e-9 ? "base" : "empate", delta };
+}
+
+// Filas de un JSONL de laya-train (datos externos) en la forma que usa scoreEval: {label, text}.
+export function rowsFromJsonl(text) {
+  return String(text).split("\n").filter((l) => l.trim()).map((l) => {
+    const r = JSON.parse(l);
+    return { text: r.state?.body ?? "", label: Object.values(r.expected ?? {})[0] };
+  });
 }

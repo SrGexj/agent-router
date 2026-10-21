@@ -62,6 +62,26 @@ describe("API", () => {
     ]);
   });
 
+  it("filtra por sesión (?session=id8), valida el formato y admite más de 200", async () => {
+    const store = createStore({ runsDir: dir });
+    for (let i = 1; i <= 205; i++) await store.append(`20260101T000000Z-aaaaaaaa-${i}`, start(`20260101T000000Z-aaaaaaaa-${i}`));
+    await store.append("20260102T000000Z-bbbbbbbb-1", start("20260102T000000Z-bbbbbbbb-1"));
+    const app = createApp({ store });
+    const b = await request(app).get("/api/runs?session=bbbbbbbb").expect(200);
+    expect(b.body.runs.map((r) => r.id)).toEqual(["20260102T000000Z-bbbbbbbb-1"]);
+    const a = await request(app).get("/api/runs?session=aaaaaaaa&limit=1000").expect(200);
+    expect(a.body.runs).toHaveLength(205);
+    expect((await request(app).get("/api/runs?limit=1000").expect(200)).body.runs).toHaveLength(200);
+    for (const bad of ["abc", "ZZZZZZZZ", "aaaaaaaaa", "aaaaaaaa&session=bbbbbbbb"]) await request(app).get(`/api/runs?session=${bad}`).expect(400);
+  });
+
+  it("?session respeta el token de acceso remoto", async () => {
+    const store = createStore({ runsDir: dir });
+    const app = createApp({ store, accessToken: "secreto" });
+    const res = await request(app).get("/api/runs?session=aaaaaaaa").set("Host", "publico.example");
+    expect(res.status).not.toBe(200);
+  });
+
   it("limita el número de ejecuciones", async () => {
     const store = createStore({ runsDir: dir });
     for (let i = 1; i <= 5; i++) await store.append(`2026010${i}T000000Z-1-a`, start(`2026010${i}T000000Z-1-a`));

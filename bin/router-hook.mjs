@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Hook de las sesiones `co`/`cop`: traduce cada evento de Claude Code a eventos del dashboard.
-// Nunca bloquea a Claude: siempre sale con 0 y solo escribe en stdout al inyectar pendientes tras compactar.
+// Siempre sale con 0. Solo escribe en stdout al inyectar pendientes tras compactar y al denegar subagentes bloqueados (blockedAgents) y al bajar de nivel un subagente (layaRouting=downgrade).
 import { spawn } from "node:child_process";
 import { appendFile, mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -16,6 +16,9 @@ import { advanceUsage, agentTranscriptPath, startUsage, usageFromTranscript } fr
 import { makeRunId } from "../src/core/run.mjs";
 import { reduceEvents } from "../src/core/reducer.mjs";
 import { compactionsFromTranscript } from "../src/core/compaction.mjs";
+import { blockEvent, decideBlock, denyOutput } from "../src/core/block-agents.mjs";
+import { createLayaClassifier } from "../src/core/classifier.mjs";
+import { routeAgent } from "../src/core/laya-routing.mjs";
 import { collectPending, formatPending } from "../src/core/pending.mjs";
 
 const config = loadConfig();
@@ -161,6 +164,29 @@ try {
     process.exit(0);
   }
 
+  // Subagentes que heredan Opus: se deniega el lanzamiento (sin task_request, que quedaría pendiente para siempre).
+  const block = decideBlock(payload, config.blockedAgents);
+  if (block) {
+    process.stdout.write(JSON.stringify(denyOutput(block.reason)));
+    if (session.runId) await store.append(session.runId, blockEvent(payload, block.agent, Date.now()));
+    process.exit(0);
+  }
+
+  // Laya (sombra/downgrade): fail-open; si baja de nivel, el resto del hook ve ya el tool_input corregido.
+  if (config.layaRouting !== "off") {
+    try {
+      const classifier = createLayaClassifier({ url: config.shadow.layaUrl, fetch, timeoutMs: config.layaTimeoutMs, ...(config.layaRoutingModel && { model: config.layaRoutingModel }) });
+      const routed = await routeAgent({ payload, mode: config.layaRouting, threshold: config.layaDowngradeThreshold, classifier, timeoutMs: config.layaTimeoutMs });
+      if (routed) {
+        if (session.runId) await store.append(session.runId, routed.event);
+        if (routed.output) {
+          process.stdout.write(JSON.stringify(routed.output));
+          payload.tool_input = routed.input;
+        }
+      }
+    } catch { /* Laya nunca puede romper ni bloquear el hook */ }
+  }
+
   const ctx = { profile: config.profile };
   if (payload.hook_event_name === "UserPromptSubmit" && payload.transcript_path) {
     ctx.transcriptSize = await transcriptSize(payload.transcript_path);
@@ -179,7 +205,11 @@ try {
     const a = await agentUsageOf(agentTranscriptPath(payload), session.agentUsage?.[payload.agent_id]?.state);
     if (a) ctx.agentLive = a;
   }
-  const closes = CLOSING.has(payload.hook_event_name) || (payload.hook_event_name === "Stop" && (payload.background_tasks ?? []).length === 0);
+  if (payload.hook_event_name === "Stop" && session.runId && (payload.background_tasks ?? []).length > 0) {
+    const run = reduceEvents(await store.readRun(session.runId));
+    ctx.runningTasks = Object.values(run?.tasks ?? {}).filter((t) => t.status === "running").length;
+  }
+  const closes = CLOSING.has(payload.hook_event_name) || (payload.hook_event_name === "Stop" && ((payload.background_tasks ?? []).length === 0 || ctx.runningTasks === 0));
   const now = Date.now();
   if ((closes && session.runId) || liveUsageDue(payload, session, now)) {
     const o = await orchestratorUsageOf(payload.transcript_path, session);

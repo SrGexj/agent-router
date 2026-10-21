@@ -134,6 +134,7 @@ Solo `src/config.mjs` lee variables de entorno. El resto del código recibe la c
 | `ROUTER_FALLBACK_MODEL` | `sonnet` | Modelo de respaldo si Opus está saturado. |
 | `ROUTER_MAX_BUDGET_USD` | sin tope | Tope de gasto por ejecución. |
 | `CLAUDE_BIN` | `claude` | Binario de Claude Code. |
+| `ROUTER_RELEVO_TOKENS` | `150000` | Contexto (tokens) de la sesión principal a partir del cual el orquestador escribe un archivo de relevo en `<ROUTER_HOME>/relevo/<perfil>/<proyecto>.md` y te pide abrir un `co`/`cop` nuevo, que lo recibe al arrancar. La statusline y el dashboard muestran «relevo». |
 | `ROUTER_SEAT_USD` | sin definir | Precio mensual de tu plan. Sin él no se muestra «Rendimiento del seat». |
 | `ROUTER_MONITOR_BIN` | `claude-monitor` | Ruta de claude-monitor. El instalador fija la ruta absoluta si la encuentra. |
 | `ROUTER_MONITOR_WAREHOUSE` | activo | `0` apaga el histórico de claude-monitor (sin totales por día, semana y mes). |

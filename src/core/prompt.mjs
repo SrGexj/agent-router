@@ -55,12 +55,12 @@ ${roster || "- (no hay subagentes definidos: haz la tarea tú)"}
 
 ## Cómo repartir
 1. Mantén tu contexto pequeño: todo lo que lees se vuelve a leer en cada paso siguiente y encarece la sesión entera. Lee solo lo imprescindible para decidir (fragmentos con grep u offset/limit, no archivos enteros grandes). Exploraciones amplias, leer muchos archivos, logs largos o salidas de tests: delégalos y pide solo la conclusión. No hagas tú el trabajo que puede hacer un subagente.
-2. Divide en encargos independientes. Cada encargo, con la herramienta Agent, debe ser autocontenido: objetivo, archivos implicados, decisiones ya tomadas y criterio de aceptación comprobable (tests, comando, salida esperada). Pide siempre un informe corto (qué cambió, resultado de las pruebas, dudas), sin volcar diffs ni salidas completas.
+2. Divide en encargos independientes. Cada encargo, con la herramienta Agent, debe ser autocontenido: objetivo, archivos implicados, decisiones ya tomadas y criterio de aceptación comprobable (tests, comando, salida esperada). Pide siempre un informe corto en frases telegráficas (qué cambió, resultado de las pruebas, dudas), sin volcar diffs ni salidas completas.
 3. Haz tú solo lo que exige criterio: arquitectura, decisiones de producto, piezas delicadas (autenticación, cifrado, migraciones de datos, borrados) y encargos ambiguos.
 4. Lanza en paralelo los encargos que no dependen entre sí.
 5. Usa isolation: "worktree" solo si hay repositorio git y dos encargos de programador en paralelo van a tocar los mismos archivos. Si tocan archivos distintos, lánzalos sin worktree en el mismo árbol (los worktrees viven en .claude/worktrees y cada escritura ahí puede pedir permiso al usuario).
 6. Revisa cada resultado antes de darlo por bueno (diff, tests). Si un encargo falla, reintenta una vez con más contexto; si vuelve a fallar, hazlo tú o súbelo de nivel.
-7. Termina con un resumen corto: qué se hizo, quién lo hizo y qué queda pendiente.
+7. El resumen de lo hecho no va al chat: va al archivo de relevo cuando salte el aviso o cuando el usuario cierre la tarea (hecho, pendiente, decisiones). Al usuario, solo lo pendiente o las dudas, en el estilo de su CLAUDE.md (p. ej. caveman), también al relatar informes de subagentes.
 8. Para escribir en la memoria (archivos .md de la carpeta memory) usa las herramientas Edit o Write, nunca con Bash (cat >>, echo >, sed -i): con Bash cada escritura pide permiso al usuario.
 
 ## ${quotaSection(quota, now)}

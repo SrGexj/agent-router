@@ -5,6 +5,7 @@ import { workerView } from "../../../src/core/view.mjs";
 import { spendShare, tokenShare, isWaiting, costBreakdown } from "../../../src/core/details.mjs";
 import { runContext, runBusy, contextAdvice } from "../../../src/core/compaction.mjs";
 import { fmtDuration, fmtCost, fmtTokens, usageTitle, layaNode, orchestratorSub, ownSubagentsLine, spendPending, workerSub } from "../captions.js";
+import { directEditsLine } from "../../../src/core/delegar.mjs";
 
 export const VB = { w: 960, h: 548 };
 
@@ -206,7 +207,7 @@ export default function Scene({ run, phase, now, packets }) {
   const spend = costBreakdown(run).hasData ? costBreakdown(run).total : null;
   const usoTotal = uso ? uso.tokens.opus + uso.tokens.sonnet + uso.tokens.haiku : 0;
   const ctx = runContext(run);
-  const advice = ctx ? contextAdvice(ctx.pct, runBusy(run, now)) : null;
+  const advice = ctx ? contextAdvice(ctx.pct, runBusy(run, now), ctx.relevo) : null;
   const manual = run?.mode === "manual";
 
   const spin = !live ? "off" : ["recibe", "analiza", "delega", "revisa"].includes(phase) ? "fast" : "slow";
@@ -232,6 +233,7 @@ export default function Scene({ run, phase, now, packets }) {
   const P = { pill: workerPill(prog, run?.endedAt != null), sub: workerSub(run, "programador", "Sonnet") };
   const orqSub = orchestratorSub(run);
   const ownLine = ownSubagentsLine(run);
+  const directLine = directEditsLine(run);
   const laya = layaNode(run, now);
   const spendNote = spendPending(run, share);
 
@@ -294,12 +296,13 @@ export default function Scene({ run, phase, now, packets }) {
             </div>
           )}
           {ctx && (
-            <div className={`gauge gauge-ctx ${contextTone(ctx.pct)}`} title={`Contexto actual: ${ctx.tokens.toLocaleString("es-ES")} tokens de ${(ctx.limit ?? ctx.window).toLocaleString("es-ES")}`}>
+            <div className={`gauge gauge-ctx ${advice.level === "relevo" ? "relevo" : contextTone(ctx.pct)}`} title={`Contexto actual: ${ctx.tokens.toLocaleString("es-ES")} tokens de ${(ctx.limit ?? ctx.window).toLocaleString("es-ES")}`}>
               <div className="gauge-head"><span className="gauge-cap">contexto</span><b>{contextValue(ctx)}</b></div>
               <div className="bar"><span className="seg" style={{ width: `${Math.min(100, ctx.pct)}%` }} /></div>
-              {advice.text && <div className={`gauge-note ctx-warn ${advice.level}`}>{advice.text}</div>}
+              {advice.text && <div className={`gauge-note ctx-warn ${advice.level}`}>{advice.text}{advice.relevo && advice.level !== "relevo" ? " · relevo" : ""}</div>}
             </div>
           )}
+          {directLine && <div className="gauge-note gauge-direct">{directLine}</div>}
         </div>
 
         <Label x={N.asistente.x} y={98} className="title">Asistente</Label>

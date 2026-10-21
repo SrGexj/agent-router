@@ -9,6 +9,8 @@ export const WINDOW_DEFAULT = 200_000;
 export const WINDOW_1M = 1_000_000;
 // Ventana a la que compactan solas las sesiones co/cop (autoCompactWindow de buildCoSettings): el aviso se mide contra ella.
 export const CO_AUTOCOMPACT_WINDOW = 250_000;
+// Contexto (tokens) a partir del cual toca relevo de conversación: ROUTER_RELEVO_TOKENS lo cambia (config.relevoTokens).
+export const RELEVO_TOKENS_DEFAULT = 150_000;
 // Tokens de salida que se estiman por carácter del resumen (el resumen real lleva además un bloque de análisis que se descarta).
 const CHARS_PER_TOKEN = 3;
 
@@ -37,15 +39,17 @@ export function contextState(ctx) {
   const limit = ctx.limit > 0 ? Math.min(ctx.limit, window) : window;
   const ratio = tokens / limit;
   const level = ratio >= CONTEXT_CRITICAL ? "critical" : ratio >= CONTEXT_WARN ? "warn" : "ok";
-  return { tokens, window, limit: ctx.limit > 0 ? limit : null, pct: Math.floor(ratio * 100), level };
+  const relevo = ctx.relevoAt > 0 && tokens >= ctx.relevoAt;
+  return { tokens, window, limit: ctx.limit > 0 ? limit : null, pct: Math.floor(ratio * 100), level, relevo };
 }
 
 // Estado del contexto de una ejecución (run.context lo escribe la statusline); null si aún no hay datos.
-export const runContext = (run) => (run?.context ? contextState({ ...run.context, limit: CO_AUTOCOMPACT_WINDOW }) : null);
+export const runContext = (run) => (run?.context ? contextState({ relevoAt: RELEVO_TOKENS_DEFAULT, ...run.context, limit: CO_AUTOCOMPACT_WINDOW }) : null);
 
 // Sin eventos durante este tiempo y sin encargos en curso, la ejecución se considera ociosa.
 export const BUSY_MS = 30_000;
 export const CONTEXT_HELP = "Tarea cerrada y memoria al día → /clear. A mitad de tarea → deja que compacte.";
+export const RELEVO_HELP = "Relevo: el orquestador escribe el resumen en el archivo de relevo y tú abres un co/cop nuevo en el proyecto.";
 
 // ¿Hay trabajo en curso? Encargos running o ejecución activa (no esperando al usuario) con eventos recientes.
 export function runBusy(run, now) {
@@ -55,18 +59,21 @@ export function runBusy(run, now) {
 }
 
 // Nivel y texto del aviso según el % de contexto y si hay trabajo en curso: ocioso → /clear, trabajando → compactar.
-export function contextAdvice(pct, busy) {
-  if (pct >= CONTEXT_CRITICAL * 100) return { level: "critical", text: busy ? "compacta ya" : "haz /clear" };
-  if (pct >= CONTEXT_WARN * 100) return { level: "warn", text: busy ? "compactar pronto" : "buen momento para /clear" };
+// `relevo` (se pasó el umbral de relevo): sin aviso de 80/90 % el texto es "relevo"; con él, se mantiene y se añade relevo: true.
+export function contextAdvice(pct, busy, relevo = false) {
+  const flag = relevo ? { relevo: true } : {};
+  if (pct >= CONTEXT_CRITICAL * 100) return { level: "critical", text: busy ? "compacta ya" : "haz /clear", ...flag };
+  if (pct >= CONTEXT_WARN * 100) return { level: "warn", text: busy ? "compactar pronto" : "buen momento para /clear", ...flag };
+  if (relevo) return { level: "relevo", text: "relevo", ...flag };
   return { level: "ok", text: null };
 }
 
 // Entrada de la statusline → evento de contexto (null sin uso del último turno).
-export function contextFromStatusline(input, now) {
+export function contextFromStatusline(input, now, relevoAt = null) {
   const cw = input?.context_window;
   const tokens = contextTokens(cw?.current_usage);
   if (!(tokens > 0)) return null;
-  return { type: "context", tokens, model: input?.model?.id ?? null, window: cw.context_window_size > 0 ? cw.context_window_size : null, t: now };
+  return { type: "context", tokens, model: input?.model?.id ?? null, window: cw.context_window_size > 0 ? cw.context_window_size : null, ...(relevoAt > 0 && { relevoAt }), t: now };
 }
 
 // Para no escribir un evento por cada token: mismo modelo y ventana, y menos de un 1 % de la ventana de diferencia.

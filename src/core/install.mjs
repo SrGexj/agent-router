@@ -11,24 +11,33 @@ export const withoutZshBlock = withoutBlock;
 export const ZSH_START = SHELL_START;
 
 const HOOK_EVENTS = ["UserPromptSubmit", "PreToolUse", "PostToolUse", "SubagentStart", "SubagentStop", "Stop", "StopFailure", "PermissionDenied", "SessionEnd", "Notification", "PreCompact", "SessionStart"];
-// SessionStart solo tras compactar (no en cada arranque); el resto, sin filtro.
-const MATCHERS = { SessionStart: "compact" };
+// SessionStart solo tras compactar (pendientes) y al arrancar (relevo), con una entrada por origen; el resto, sin filtro.
+const MATCHERS = { SessionStart: ["compact", "startup"] };
 
 const cmd = (node, script) => `"${node}" "${script}"`;
 
 export function buildCoSettings({ node, root }) {
   const hook = cmd(node, `${root}/bin/router-hook.mjs`);
-  const hooks = Object.fromEntries(HOOK_EVENTS.map((e) => [e, [{ matcher: MATCHERS[e] ?? "", hooks: [{ type: "command", command: hook, timeout: 5 }] }]]));
+  const hooks = Object.fromEntries(HOOK_EVENTS.map((e) => [e, [MATCHERS[e] ?? ""].flat().map((matcher) => ({ matcher, hooks: [{ type: "command", command: hook, timeout: 5 }] }))]));
   return {
     hooks,
     // Compactar antes (ventana de 250k) para no llegar al límite con el contexto ya degradado; solo sesiones co/cop.
     autoCompactWindow: CO_AUTOCOMPACT_WINDOW,
     // Los subagentes con isolation "worktree" escriben en .claude/worktrees/, que Claude Code protege:
     // sin esto cada escritura pide permiso. Solo afecta a las sesiones co (este archivo va por --settings).
-    permissions: { allow: ["Edit(**/.claude/worktrees/**)", "Write(**/.claude/worktrees/**)"] },
+    permissions: { allow: ["Edit(**/.claude/worktrees/**)"] },
     // refreshInterval: Esc no dispara hooks; la statusline mira el transcript cada 2 s para cerrar la ejecución.
     statusLine: { type: "command", command: cmd(node, `${root}/bin/router-statusline.mjs`), padding: 0, refreshInterval: 2 }
   };
+}
+
+// Decide qué statusline queda encadenada tras co: un statusline-next ya existente y no vacío (p. ej. un envoltorio
+// a mano) manda y no se pisa; si no, se encadena la del usuario salvo que sea la del propio router.
+export function planStatuslineChain({ userCmd, existingNext }) {
+  const existing = (existingNext ?? "").trim();
+  if (existing) return { write: false, chained: existing };
+  if (userCmd && !userCmd.includes("router-statusline")) return { write: true, chained: userCmd };
+  return { write: false, chained: null };
 }
 
 // Servicio del dashboard: spec neutra que cada plataforma convierte en plist o unit.

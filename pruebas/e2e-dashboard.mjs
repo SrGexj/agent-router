@@ -426,6 +426,7 @@ try {
       { type: "task_usage", taskId: "b", byModel: { "claude-haiku-5-5": { input: Mi, output: 0, cacheRead: 0, cacheWrite5m: 0, cacheWrite1h: 0 } }, t: t + 3300 },
       { type: "task_end", taskId: "b", status: "failed", summary: "", t: t + 4000 },
       { type: "orchestrator_usage", byModel: { "claude-opus-5-5": { input: 100_000, output: 50_000, cacheRead: 0, cacheWrite5m: 0, cacheWrite1h: 0 } }, t: t + 5000 },
+      { type: "context", tokens: 189_300, model: "claude-opus-5-5", window: Mi, t: t + 5100 },
       { type: "run_end", status: "done", exitCode: 0, t: t + 190_000 }
     ];
     await writeFile(join(home, "runs", "final-1.jsonl"), ev.map((e) => JSON.stringify(e)).join("\n") + "\n");
@@ -441,7 +442,7 @@ try {
     await page.waitForFunction(() => document.querySelector(".card")?.innerText.includes("2 encargos · 4,50 $"), { timeout: 10_000 }).catch(() => {});
     await page.evaluate(() => new Promise((r) => setTimeout(r, 200)));
     const card = await page.$eval(".card", (el) => el.innerText);
-    for (const x of ["Opus · 1,40 $ · 150 k tok", "Sonnet 5.5 · 1 encargo · 3,00 $ · 1,1 M tok", "Haiku 5.5 · 1 encargo · 0,10 $ · 1 M tok", "2 encargos · 4,50 $ · 2,3 M tok · 3 min 10 s"]) {
+    for (const x of ["Sonnet 5.5 · 1 encargo · 3,00 $ · 1,1 M tok", "Haiku 5.5 · 1 encargo · 0,10 $ · 1 M tok", "2 encargos · 4,50 $ · 2,3 M tok · 3 min 10 s", "GASTO", "USO", "CONTEXTO", "75 % · 189,3 k / 250 k"]) {
       if (!card.includes(x)) fail(`Falta "${x}" en la escena terminada:\n${card}`);
     }
     if (process.env.E2E_SHOT_SCENE) await (await page.$(".card")).screenshot({ path: process.env.E2E_SHOT_SCENE });

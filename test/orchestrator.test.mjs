@@ -101,7 +101,8 @@ Haces tareas acotadas.
     expect(agents.programador.model).toBe("sonnet");
     expect(agents.asistente.prompt.length).toBeGreaterThan(50);
     // Web y navegador: forma documentada (comodín por servidor MCP).
-    expect(agents.asistente.tools).toEqual(expect.arrayContaining(["WebSearch", "WebFetch", "mcp__claude-in-chrome__*", "mcp__chrome-devtools__*"]));
+    expect(agents.asistente.tools).toEqual(expect.arrayContaining(["WebSearch", "WebFetch", "mcp__claude-in-chrome__*", "mcp__chrome-devtools__*", "mcp__figma-console__*", "mcp__claude_ai_Figma__*", "mcp__plugin_figma_figma__*"]));
+    expect(agents.asistente.description).toMatch(/leer diseños de Figma y resumirlos/);
     expect(agents.asistente.description).toMatch(/buscar en la web.*probar webs y apps en navegador o simulador/);
   });
 

@@ -47,11 +47,11 @@ const familyName = (model) => {
   return m ? `${m[1][0].toUpperCase()}${m[1].slice(1).toLowerCase()}` : null;
 };
 
-// Bajo el orquestador: "Opus · 1,40 $ · 150 k tok". null sin datos de uso suyos.
+// Bajo el orquestador: solo el modelo ("Opus"); coste y tokens van en la tarjeta de gasto/uso. null sin datos de uso suyos.
 export function orchestratorSub(run) {
   const o = costBreakdown(run).orchestrator;
   if (o.tokens <= 0) return null;
-  return [familyName(o.models[0]) ?? "Opus", fmtCost(o.costUsd), `${fmtTokens(o.tokens)} tok`].join(" · ");
+  return familyName(o.models[0]) ?? "Opus";
 }
 
 // Bajo el orquestador: sus subagentes propios (Explore, general-purpose, Plan...), que no van a los nodos de rol.

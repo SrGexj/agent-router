@@ -205,8 +205,8 @@ describe("resumen final de una ejecución", () => {
     expect(captionFor("fallo", failed, 0)).toMatchObject({ title: "Falló", text: "2 encargos · 4,50 $ · 2,3 M tok · 3 min 10 s. Overloaded" });
   });
 
-  it("orchestratorSub: modelo, coste y tokens del orquestador; null sin datos", () => {
-    expect(orchestratorSub(full())).toBe("Opus · 1,40 $ · 150 k tok");
+  it("orchestratorSub: solo el modelo del orquestador; null sin datos", () => {
+    expect(orchestratorSub(full())).toBe("Opus");
     expect(orchestratorSub(reduceEvents([start]))).toBeNull();
     expect(orchestratorSub(null)).toBeNull();
   });

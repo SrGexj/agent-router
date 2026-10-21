@@ -1,9 +1,10 @@
 import { useEffect, useRef } from "react";
+import { barSegments, legendItems, contextTone, contextValue } from "../gauge.js";
 import { boxFaces, isoCircle, iso, bezierPoint, bezierPath, easeInOut, shadowLink, LAYA } from "./geometry.js";
 import { workerView } from "../../../src/core/view.mjs";
-import { spendShare, tokenShare, isWaiting } from "../../../src/core/details.mjs";
+import { spendShare, tokenShare, isWaiting, costBreakdown } from "../../../src/core/details.mjs";
 import { runContext, runBusy, contextAdvice } from "../../../src/core/compaction.mjs";
-import { fmtDuration, usageTitle, layaNode, orchestratorSub, ownSubagentsLine, spendPending, workerSub } from "../captions.js";
+import { fmtDuration, fmtCost, fmtTokens, usageTitle, layaNode, orchestratorSub, ownSubagentsLine, spendPending, workerSub } from "../captions.js";
 import { directEditsLine } from "../../../src/core/delegar.mjs";
 
 export const VB = { w: 960, h: 548 };
@@ -172,6 +173,25 @@ function packetPoint(pk, now) {
   return { p, o: Math.min(1, raw * 10, (1 - raw) * 10) };
 }
 
+// Barra de 6 px segmentada por familia de modelo; vacía (solo la pista) sin datos.
+function Bar({ share }) {
+  return (
+    <div className="bar">
+      {barSegments(share).map((s) => <span key={s.key} className={`seg ${s.key}`} style={{ width: `${s.pct}%` }} />)}
+    </div>
+  );
+}
+
+// Leyenda en una línea con un punto de color por modelo; los modelos al 0 % no salen y sin datos queda «—».
+function Legend({ share }) {
+  const items = legendItems(share);
+  return (
+    <div className="legend">
+      {items.length === 0 ? <span>—</span> : items.map((i) => <span key={i.key}><i className={`ldot ${i.key}`} />{i.name} <b>{i.pct}%</b></span>)}
+    </div>
+  );
+}
+
 export default function Scene({ run, phase, now, packets }) {
   // En ventanas estrechas la escena se desplaza: empieza centrada en el orquestador.
   const scroller = useRef(null);
@@ -184,6 +204,8 @@ export default function Scene({ run, phase, now, packets }) {
   const prog = workerView(run, "programador", now);
   const share = spendShare(run);
   const uso = tokenShare(run);
+  const spend = costBreakdown(run).hasData ? costBreakdown(run).total : null;
+  const usoTotal = uso ? uso.tokens.opus + uso.tokens.sonnet + uso.tokens.haiku : 0;
   const ctx = runContext(run);
   const advice = ctx ? contextAdvice(ctx.pct, runBusy(run, now), ctx.relevo) : null;
   const manual = run?.mode === "manual";
@@ -216,7 +238,7 @@ export default function Scene({ run, phase, now, packets }) {
   const spendNote = spendPending(run, share);
 
   return (
-    <div className="scene-scroll" ref={scroller}>
+    <div className={`scene-scroll${share || uso || ctx ? " with-gauge" : ""}`} ref={scroller}>
     <div className="scene">
       <svg viewBox={`0 0 ${VB.w} ${VB.h}`} role="img" aria-label="Red de agentes: tú, orquestador, asistente y programador, con Laya en sombra">
         <You active={live} />
@@ -260,45 +282,27 @@ export default function Scene({ run, phase, now, packets }) {
         <Label x={N.orq.x} y={N.orq.y + 76}><Pill dot={orqPill.dot}>{orqPill.text}</Pill></Label>
         {orqSub && <Label x={N.orq.x} y={N.orq.y + 98} className="sub orq-sub">{orqSub}</Label>}
         {ownLine && <Label x={N.orq.x} y={N.orq.y + (orqSub ? 118 : 98)} className="sub orq-own">{ownLine}</Label>}
-        {directLine && <Label x={N.orq.x} y={N.orq.y + 98 + (orqSub ? 20 : 0) + (ownLine ? 20 : 0)} className="sub orq-direct">{directLine}</Label>}
-        <div className="split" style={{ left: pctX(N.orq.x), top: pctY(N.orq.y + 98 + (orqSub ? 22 : 0) + (ownLine ? 20 : 0) + (directLine ? 20 : 0)) }} title={share ? "Reparto del gasto real en dólares (precios API), orquestador incluido" : "Sin datos de uso todavía"}>
-          <div className="split-cap">gasto</div>
-          <div className="bar">
-            <span className="seg opus" style={{ width: `${share?.opus ?? 0}%` }} />
-            <span className="seg sonnet" style={{ width: `${share?.sonnet ?? 0}%` }} />
-            <span className="seg haiku" style={{ width: `${share?.haiku ?? 0}%` }} />
+        <div className="split" style={{ left: pctX(N.orq.x), top: pctY(N.orq.y + 98 + (orqSub ? 22 : 0) + (ownLine ? 20 : 0)) }}>
+          <div className="gauge" title={share ? "Reparto del gasto real en dólares (precios API), orquestador incluido" : "Sin datos de uso todavía"}>
+            <div className="gauge-head"><span className="gauge-cap">gasto</span><b>{spend != null ? fmtCost(spend) : spendNote ? "…" : "—"}</b></div>
+            <Bar share={share} />
+            {spendNote ? <div className="gauge-note">{spendNote}</div> : <Legend share={share} />}
           </div>
-          {spendNote ? <div className="split-pending">{spendNote}</div> : (
-            <div className="split-labels">
-              <span>Opus <b>{share ? `${share.opus}%` : "—"}</b></span>
-              <span>Sonnet <b>{share ? `${share.sonnet}%` : "—"}</b></span>
-              <span>Haiku <b>{share ? `${share.haiku}%` : "—"}</b></span>
-            </div>
-          )}
           {uso && (
-            <div className="split-uso" title={usageTitle(uso)}>
-              <div className="split-cap">uso</div>
-              <div className="bar">
-                <span className="seg opus" style={{ width: `${uso.opus}%` }} />
-                <span className="seg sonnet" style={{ width: `${uso.sonnet}%` }} />
-                <span className="seg haiku" style={{ width: `${uso.haiku}%` }} />
-              </div>
-              <div className="split-labels">
-                <span>Opus <b>{uso.opus}%</b></span>
-                <span>Sonnet <b>{uso.sonnet}%</b></span>
-                <span>Haiku <b>{uso.haiku}%</b></span>
-              </div>
+            <div className="gauge" title={usageTitle(uso)}>
+              <div className="gauge-head"><span className="gauge-cap">uso</span><b>{fmtTokens(usoTotal)}</b></div>
+              <Bar share={uso} />
+              <Legend share={uso} />
             </div>
           )}
           {ctx && (
-            <div className={`split-ctx ${advice.level === "relevo" ? "relevo" : ctx.level}`} title={`Contexto actual: ${ctx.tokens.toLocaleString("es-ES")} tokens de ${(ctx.limit ?? ctx.window).toLocaleString("es-ES")}`}>
+            <div className={`gauge gauge-ctx ${advice.level === "relevo" ? "relevo" : contextTone(ctx.pct)}`} title={`Contexto actual: ${ctx.tokens.toLocaleString("es-ES")} tokens de ${(ctx.limit ?? ctx.window).toLocaleString("es-ES")}`}>
+              <div className="gauge-head"><span className="gauge-cap">contexto</span><b>{contextValue(ctx)}</b></div>
               <div className="bar"><span className="seg" style={{ width: `${Math.min(100, ctx.pct)}%` }} /></div>
-              <div className="split-labels">
-                <span>Contexto <b>{ctx.pct}%</b></span>
-                {advice.text && <span className="ctx-warn">{advice.text}{advice.relevo && advice.level !== "relevo" ? " · relevo" : ""}</span>}
-              </div>
+              {advice.text && <div className={`gauge-note ctx-warn ${advice.level}`}>{advice.text}{advice.relevo && advice.level !== "relevo" ? " · relevo" : ""}</div>}
             </div>
           )}
+          {directLine && <div className="gauge-note gauge-direct">{directLine}</div>}
         </div>
 
         <Label x={N.asistente.x} y={98} className="title">Asistente</Label>

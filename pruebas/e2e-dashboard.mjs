@@ -425,6 +425,7 @@ try {
       { type: "task_usage", taskId: "b", byModel: { "claude-haiku-5-5": { input: Mi, output: 0, cacheRead: 0, cacheWrite5m: 0, cacheWrite1h: 0 } }, t: t + 3300 },
       { type: "task_end", taskId: "b", status: "failed", summary: "", t: t + 4000 },
       { type: "orchestrator_usage", byModel: { "claude-opus-5-5": { input: 100_000, output: 50_000, cacheRead: 0, cacheWrite5m: 0, cacheWrite1h: 0 } }, t: t + 5000 },
+      { type: "context", tokens: 189_300, model: "claude-opus-5-5", window: Mi, t: t + 5100 },
       { type: "run_end", status: "done", exitCode: 0, t: t + 190_000 }
     ];
     await writeFile(join(home, "runs", "final-1.jsonl"), ev.map((e) => JSON.stringify(e)).join("\n") + "\n");
@@ -440,7 +441,7 @@ try {
     await page.waitForFunction(() => document.querySelector(".card")?.innerText.includes("2 encargos · 4,50 $"), { timeout: 10_000 }).catch(() => {});
     await page.evaluate(() => new Promise((r) => setTimeout(r, 200)));
     const card = await page.$eval(".card", (el) => el.innerText);
-    for (const x of ["Opus · 1,40 $ · 150 k tok", "Sonnet 5.5 · 1 encargo · 3,00 $ · 1,1 M tok", "Haiku 5.5 · 1 encargo · 0,10 $ · 1 M tok", "2 encargos · 4,50 $ · 2,3 M tok · 3 min 10 s"]) {
+    for (const x of ["Sonnet 5.5 · 1 encargo · 3,00 $ · 1,1 M tok", "Haiku 5.5 · 1 encargo · 0,10 $ · 1 M tok", "2 encargos · 4,50 $ · 2,3 M tok · 3 min 10 s", "GASTO", "USO", "CONTEXTO", "75 % · 189,3 k / 250 k"]) {
       if (!card.includes(x)) fail(`Falta "${x}" en la escena terminada:\n${card}`);
     }
     if (process.env.E2E_SHOT_SCENE) await (await page.$(".card")).screenshot({ path: process.env.E2E_SHOT_SCENE });
@@ -478,6 +479,11 @@ try {
     if (live.includes("se calcula en vivo") || live.includes("Consultando")) fail(`Con datos la escena no debe seguir pidiendo espera:\n${live}`);
     for (const x of ["Laya", "sombra", "Opus 100%"]) if (!live.replace(/\s+/g, " ").toLowerCase().includes(x.toLowerCase())) fail(`Falta "${x}" en la escena en curso:\n${live}`);
     if (live.includes("coincide")) fail("Mientras la ejecución sigue en curso no hay veredicto");
+    // Ediciones directas del orquestador: fila discreta al final de la tarjeta, oculta con 0.
+    if ((await page.$eval(".split", (el) => el.innerText)).includes("ediciones directas")) fail("Sin ediciones directas no debe haber fila");
+    await appendFile(file, jsonl([{ type: "direct_edit", n: 2, t: t + 600 }]));
+    await page.waitForFunction(() => document.querySelector(".split .gauge-direct")?.textContent === "ediciones directas: 2", { timeout: 8000 })
+      .catch(async () => fail(`Falta "ediciones directas: 2" dentro de la tarjeta:\n${await scene()}`));
     const snap = async (path, width) => {
       await page.setViewport({ width, height: 1100 });
       await page.evaluate(() => new Promise((r) => setTimeout(r, 250)));

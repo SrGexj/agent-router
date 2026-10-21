@@ -18,6 +18,9 @@ function limitResetFromText(text) {
 export function createParser() {
   const taskByToolUse = new Map();
   const modelSeen = new Set();
+  const taskModel = new Map(); // taskId → modelo real visto en sus mensajes
+  const open = new Set(); // encargos arrancados y aún sin cerrar
+  const closed = new Set(); // encargos ya cerrados: un aviso repetido no emite otro task_end
   let mainModel = null;
 
   function onAssistant(msg, t) {
@@ -28,6 +31,7 @@ export function createParser() {
 
     if (taskId && model && !modelSeen.has(taskId)) {
       modelSeen.add(taskId);
+      taskModel.set(taskId, model);
       out.push({ type: "task_model", taskId, model, t });
     }
     if (!parent && model && model !== mainModel) {
@@ -52,6 +56,9 @@ export function createParser() {
   function onSystem(msg, t) {
     switch (msg.subtype) {
       case "task_started":
+        if (open.has(msg.task_id)) return [];
+        closed.delete(msg.task_id);
+        open.add(msg.task_id);
         if (msg.tool_use_id) taskByToolUse.set(msg.tool_use_id, msg.task_id);
         return [{
           type: "task_start",
@@ -63,11 +70,15 @@ export function createParser() {
           t
         }];
       case "task_notification":
+        if (closed.has(msg.task_id)) return [];
+        open.delete(msg.task_id);
+        closed.add(msg.task_id);
         return [{
           type: "task_end",
           taskId: msg.task_id,
           status: msg.status === "completed" ? "completed" : msg.status === "killed" ? "killed" : "failed",
           summary: msg.summary ?? "",
+          ...(taskModel.has(msg.task_id) ? { model: taskModel.get(msg.task_id) } : {}),
           tokens: msg.usage?.total_tokens ?? null,
           toolUses: msg.usage?.tool_uses ?? null,
           durationMs: msg.usage?.duration_ms ?? null,

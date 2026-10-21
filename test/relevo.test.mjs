@@ -99,6 +99,14 @@ describe("relevo: avisos de compaction.mjs", () => {
     expect(runContext({ context: { tokens: 150_000, model: "m", window: 1_000_000 } }).relevo).toBe(true);
   });
 
+  it("un evento por turno del transcript (sin umbral) conserva el relevoAt de la statusline", () => {
+    let run = reduceRun(null, { type: "run_start", runId: "r", task: "x", mode: "sesion", model: "opus", t: 1 });
+    run = reduceRun(run, { type: "context", tokens: 100_000, model: "m", window: 1_000_000, relevoAt: 90_000, t: 2 });
+    run = reduceRun(run, { type: "context", turn: 3, tokens: 120_000, model: "m", t: 3 });
+    expect(run.context).toMatchObject({ tokens: 120_000, relevoAt: 90_000, turn: 3 });
+    expect(runContext(run)).toMatchObject({ relevo: true });
+  });
+
   it("contextAdvice: relevo en el umbral y se mantienen 80/90 %", () => {
     expect(contextAdvice(60, true, true)).toEqual({ level: "relevo", text: "relevo", relevo: true });
     expect(contextAdvice(60, false, true)).toEqual({ level: "relevo", text: "relevo", relevo: true });

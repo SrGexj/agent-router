@@ -95,8 +95,8 @@ export function QuotaPanel({ quotas, now, savingsByProfile, shadowByProfile }) {
 
 const RUN_DOT = { running: "ok pulse", completed: "ok", failed: "err", cancelled: "idle", limited: "err" };
 const RUN_TEXT = { running: "en curso", completed: "completada", failed: "falló", cancelled: "cancelada", limited: "límite" };
-const WAIT_TEXT = { question: "pregunta", permission: "permiso", plan: "plan" };
-export const waitText = (run) => WAIT_TEXT[run.waiting?.kind] ?? "pregunta";
+const WAIT_TEXT = { question: "espera respuesta", permission: "permiso", plan: "plan" };
+export const waitText = (run) => WAIT_TEXT[run.waiting?.kind] ?? "espera respuesta";
 
 // "~" marca el coste estimado a partir de los tokens; sin él, es el que informó Claude.
 function costMeta(r) {

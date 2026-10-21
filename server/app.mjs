@@ -94,6 +94,8 @@ export function createApp({ store, monitor = null, profileLabels = {}, now = Dat
   // Etiquetas de los perfiles de cuenta (id → texto), definidas en la configuración del servidor.
   app.get("/api/profiles", (_req, res) => res.json({ labels: profileLabels }));
 
+  // Ajustes que el dashboard necesita de la configuración del servidor.
+
   app.get("/api/quota", async (_req, res) => {
     res.json({ quotas: await store.latestQuotas() });
   });

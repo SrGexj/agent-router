@@ -2,6 +2,7 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { LAYA_ROUTING_MODES } from "./core/laya-routing.mjs";
+import { RELEVO_TOKENS_DEFAULT } from "./core/compaction.mjs";
 
 const PERMISSION_MODES = new Set(["acceptEdits", "auto", "manual", "dontAsk", "plan"]);
 const LOCAL_HOSTS = new Set(["127.0.0.1", "localhost", "::1"]);
@@ -43,7 +44,7 @@ function resolveProfiles(env, home, exists) {
 export const CONFIG_KEYS = Object.freeze([
   "CLAUDE_BIN",
   "ROUTER_HOST", "ROUTER_PORT", "ROUTER_ALLOW_REMOTE", "ROUTER_ACCESS_TOKEN", "ROUTER_PERMISSION_MODE", "ROUTER_EFFORT", "ROUTER_FALLBACK_MODEL", "ROUTER_MAX_BUDGET_USD",
-  "ROUTER_SEAT_USD", "ROUTER_MONITOR_BIN", "ROUTER_MONITOR_WAREHOUSE",
+  "ROUTER_RELEVO_TOKENS", "ROUTER_SEAT_USD", "ROUTER_MONITOR_BIN", "ROUTER_MONITOR_WAREHOUSE",
   "ROUTER_SHADOW", "ROUTER_SHADOW_PROVIDER", "ROUTER_SHADOW_MODEL",
   "ROUTER_LAYA_URL", "ROUTER_LAYA_ROUTING", "ROUTER_LAYA_ROUTING_MODEL", "ROUTER_LAYA_EXTRA_MODELS", "ROUTER_LAYA_DOWNGRADE_THRESHOLD", "ROUTER_LAYA_TIMEOUT_MS", "ROUTER_LAYA_VENV", "ROUTER_LAYA_HF_HOME", "ROUTER_LAYA_PYTHON",
   "ROUTER_PROFILE_LABEL", "ROUTER_PROFILE2_DIR", "ROUTER_PROFILE2_LABEL", "ROUTER_PROFILE2_ALIAS", "ROUTER_PROFILE2_ARGS"
@@ -157,6 +158,8 @@ export function loadConfig(processEnv = process.env, { exists = existsSync, read
   const thr = Number(env.ROUTER_LAYA_DOWNGRADE_THRESHOLD);
   const tmo = Number(env.ROUTER_LAYA_TIMEOUT_MS);
 
+  const relevo = Number(env.ROUTER_RELEVO_TOKENS);
+
   const budget = env.ROUTER_MAX_BUDGET_USD ? Number(env.ROUTER_MAX_BUDGET_USD) : null;
   const seat = env.ROUTER_SEAT_USD ? Number(env.ROUTER_SEAT_USD) : null;
 
@@ -171,6 +174,9 @@ export function loadConfig(processEnv = process.env, { exists = existsSync, read
     runsDir: join(home, "runs"),
     sessionsDir: join(home, "sessions"),
     pendingDir: join(home, "pendientes"),
+    relevoDir: join(home, "relevo"),
+    // Contexto (tokens) de la sesión principal a partir del cual el orquestador escribe el relevo.
+    relevoTokens: env.ROUTER_RELEVO_TOKENS && Number.isInteger(relevo) && relevo > 0 ? relevo : RELEVO_TOKENS_DEFAULT,
     host,
     port: Number(env.ROUTER_PORT || 4317),
     accessToken,

@@ -11,14 +11,14 @@ export const withoutZshBlock = withoutBlock;
 export const ZSH_START = SHELL_START;
 
 const HOOK_EVENTS = ["UserPromptSubmit", "PreToolUse", "PostToolUse", "SubagentStart", "SubagentStop", "Stop", "StopFailure", "PermissionDenied", "SessionEnd", "Notification", "PreCompact", "SessionStart"];
-// SessionStart solo tras compactar (no en cada arranque); el resto, sin filtro.
-const MATCHERS = { SessionStart: "compact" };
+// SessionStart solo tras compactar (pendientes) y al arrancar (relevo), con una entrada por origen; el resto, sin filtro.
+const MATCHERS = { SessionStart: ["compact", "startup"] };
 
 const cmd = (node, script) => `"${node}" "${script}"`;
 
 export function buildCoSettings({ node, root }) {
   const hook = cmd(node, `${root}/bin/router-hook.mjs`);
-  const hooks = Object.fromEntries(HOOK_EVENTS.map((e) => [e, [{ matcher: MATCHERS[e] ?? "", hooks: [{ type: "command", command: hook, timeout: 5 }] }]]));
+  const hooks = Object.fromEntries(HOOK_EVENTS.map((e) => [e, [MATCHERS[e] ?? ""].flat().map((matcher) => ({ matcher, hooks: [{ type: "command", command: hook, timeout: 5 }] }))]));
   return {
     hooks,
     // Compactar antes (ventana de 250k) para no llegar al límite con el contexto ya degradado; solo sesiones co/cop.

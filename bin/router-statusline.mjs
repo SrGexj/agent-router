@@ -14,6 +14,7 @@ import { contextFromStatusline, sameContext } from "../src/core/compaction.mjs";
 import { closeInterrupted, interruptedIn, quotaFromStatusline, sameQuota } from "../src/core/hooks.mjs";
 import { readFrom, readSince } from "../src/core/transcript.mjs";
 import { usageFromTranscript } from "../src/core/usage.mjs";
+import { withRelevoTag } from "../src/core/relevo.mjs";
 
 const config = loadConfig();
 const CACHE_MS = 30_000;
@@ -40,6 +41,7 @@ function runNext(command, input) {
 const raw = await readStdin();
 let quota = null;
 let sessionId = null;
+let contextTokens = null;
 try {
   const input = JSON.parse(raw);
   sessionId = input.session_id ?? null;
@@ -70,7 +72,8 @@ try {
   }
 
   // Contexto actual (último turno) frente a la ventana: solo cuando cambia, para no escribir cada 2 s.
-  const ctxEvent = contextFromStatusline(input, Date.now());
+  const ctxEvent = contextFromStatusline(input, Date.now(), config.relevoTokens);
+  contextTokens = ctxEvent?.tokens ?? null;
   if (ctxEvent && sessionId) {
     const prev = await sessions.loadContext(sessionId);
     if (!sameContext(prev, ctxEvent)) {
@@ -98,8 +101,8 @@ if (next) {
     out = await runNext(next, raw);
     if (cacheFile) await writeFile(cacheFile, JSON.stringify({ hash, out, t: Date.now() })).catch(() => {});
   }
-  process.stdout.write(out);
+  process.stdout.write(withRelevoTag(out, contextTokens, config.relevoTokens));
 } else {
   const five = quota?.fiveHour ? ` · 5 h ${Math.round(quota.fiveHour.utilization * 100)} %` : "";
-  process.stdout.write(`${config.profileAlias}${five}`);
+  process.stdout.write(withRelevoTag(`${config.profileAlias}${five}`, contextTokens, config.relevoTokens));
 }

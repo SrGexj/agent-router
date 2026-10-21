@@ -3,6 +3,7 @@
 // como parámetros. Cada mensaje del usuario es una ejecución del dashboard.
 
 import { sanitizePrompt } from "./classifier.mjs";
+import { isDirectEdit } from "./delegar.mjs";
 
 const AGENT_TOOLS = new Set(["Agent", "Task"]);
 const WAIT_TOOLS = new Set(["AskUserQuestion", "ExitPlanMode"]);
@@ -97,7 +98,7 @@ export function liveAgentUsageDue(p, session, now) {
   return now - (session.agentUsage?.[p.agent_id]?.at ?? 0) >= LIVE_USAGE_MS;
 }
 
-// ctx: { profile, transcriptSize, interrupted, agentUsage, orchestratorUsage } — lo que el proceso del hook sabe leer del disco.
+// ctx: { profile, transcriptSize, interrupted, agentUsage, orchestratorUsage, directEdits } — lo que el proceso del hook sabe leer del disco.
 export function translateHook(p, session, now, makeRunId, ctx = {}) {
   const t = now;
   const open = session.runId;
@@ -114,7 +115,7 @@ export function translateHook(p, session, now, makeRunId, ctx = {}) {
     const res = {
       runId,
       session: next,
-      events: [{ type: "run_start", runId, task: p.prompt ?? "", mode: "sesion", model: "opus", cwd: p.cwd ?? null, profile: ctx.profile ?? "trabajo", t }]
+      events: [{ type: "run_start", runId, task: p.prompt ?? "", mode: "sesion", model: "opus", cwd: p.cwd ?? null, profile: ctx.profile ?? "trabajo", ...(ctx.directEdits > 0 && { directEdits: ctx.directEdits }), t }]
     };
     if (before) res.before = before;
     // Solo al abrir ejecución: el proceso del hook lanza el clasificador en modo sombra con este prompt ya saneado.
@@ -163,6 +164,8 @@ export function translateHook(p, session, now, makeRunId, ctx = {}) {
         return keep([tool, { type: "waiting", kind: "question", text: questions[0]?.question ?? "", questions, t }]);
       }
       if (p.tool_name === "ExitPlanMode") return keep([tool, { type: "waiting", kind: "plan", text: "Aprobar el plan", questions: [], t }]);
+      // Edición directa del orquestador: se cuenta por sesión (ctx.directEdits = las anteriores) para el dashboard.
+      if (isDirectEdit(p)) return keep([tool, { type: "direct_edit", name: p.tool_name, n: (ctx.directEdits ?? 0) + 1, t }]);
       return keep([tool]);
     }
     case "Notification": {

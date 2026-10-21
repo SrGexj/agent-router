@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Hook de las sesiones `co`/`cop`: traduce cada evento de Claude Code a eventos del dashboard.
-// Siempre sale con 0. Solo escribe en stdout al inyectar pendientes tras compactar y al denegar subagentes bloqueados (blockedAgents) y al bajar de nivel un subagente (layaRouting=downgrade).
+// Siempre sale con 0. Solo escribe en stdout al inyectar pendientes tras compactar, el relevo al arrancar o su aviso, el aviso de edición directa y al denegar subagentes bloqueados (blockedAgents) y al bajar de nivel un subagente (layaRouting=downgrade).
 import { spawn } from "node:child_process";
 import { appendFile, mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -18,6 +18,8 @@ import { blockEvent, decideBlock, denyOutput } from "../src/core/block-agents.mj
 import { createLayaClassifier } from "../src/core/classifier.mjs";
 import { routeAgent } from "../src/core/laya-routing.mjs";
 import { collectPending, formatPending } from "../src/core/pending.mjs";
+import { decideRelevo, relevoPath, relevoStartupContext, relevoUsedPath } from "../src/core/relevo.mjs";
+import { DIRECT_EDIT_WARNING, isDirectEdit } from "../src/core/delegar.mjs";
 
 const config = loadConfig();
 
@@ -120,6 +122,28 @@ async function onSessionStartCompact(payload, now) {
   } catch { /* limpieza best effort */ }
 }
 
+const additionalContext = (hookEventName, text) => process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName, additionalContext: text } }));
+
+// SessionStart (source "startup"): si hay relevo de este perfil y cwd, se inyecta una sola vez y el archivo pasa a .usado-<fecha>.md.
+async function onSessionStartup(payload, now) {
+  const file = relevoPath({ home: config.home, profile: config.profile, cwd: payload.cwd });
+  let md;
+  try { md = await readFile(file, "utf8"); } catch { return; }
+  if (!md.trim()) return;
+  await rename(file, relevoUsedPath(file, now));
+  additionalContext("SessionStart", relevoStartupContext(md));
+}
+
+// UserPromptSubmit: una vez por sesión, al pasar el umbral de contexto (dato de la statusline), pide el relevo.
+async function onRelevoCheck(payload, sessions, flags) {
+  if (flags.relevoAsked) return;
+  const context = await sessions.loadContext(payload.session_id);
+  const text = decideRelevo({ tokens: context?.tokens, threshold: config.relevoTokens, asked: false, path: relevoPath({ home: config.home, profile: config.profile, cwd: payload.cwd }) });
+  if (!text) return;
+  await sessions.saveFlags(payload.session_id, { ...flags, relevoAsked: true });
+  additionalContext("UserPromptSubmit", text);
+}
+
 // SessionStart (source "compact"): el límite de compactación ya está en el transcript. Se anota el último (preTokens,
 // postTokens, duración, tamaño del resumen, modelo) en la ejecución para estimar su coste. Una sola vez por límite.
 async function onCompactStats(payload, session, store) {
@@ -149,6 +173,7 @@ try {
       try { await onCompactStats(payload, session, store); } catch { /* el coste es accesorio: nunca impide inyectar pendientes */ }
       await onSessionStartCompact(payload, Date.now());
     }
+    if (payload.source === "startup") await onSessionStartup(payload, Date.now());
     process.exit(0);
   }
 
@@ -176,6 +201,15 @@ try {
   }
 
   const ctx = { profile: config.profile };
+  // Flags de la sesión (ediciones directas, relevo ya avisado): solo se leen en los dos eventos que los usan.
+  const useFlags = payload.hook_event_name === "UserPromptSubmit" || isDirectEdit(payload);
+  const flags = useFlags ? await sessions.loadFlags(payload.session_id) : null;
+  if (flags) ctx.directEdits = flags.directEdits ?? 0;
+  if (isDirectEdit(payload)) {
+    // Solo aviso: nunca permissionDecision.
+    await sessions.saveFlags(payload.session_id, { ...flags, directEdits: ctx.directEdits + 1 });
+    additionalContext("PreToolUse", DIRECT_EDIT_WARNING);
+  }
   if (payload.hook_event_name === "UserPromptSubmit" && payload.transcript_path) {
     ctx.transcriptSize = await transcriptSize(payload.transcript_path);
     if (session.runId && session.transcriptOffset != null) {
@@ -204,6 +238,7 @@ try {
   for (const ev of res.events) await store.append(res.runId, ev);
   if (res.session !== session) await sessions.save(payload.session_id, res.session);
   if (res.shadow) await launchShadow(res.shadow);
+  if (payload.hook_event_name === "UserPromptSubmit") await onRelevoCheck(payload, sessions, flags);
 } catch (e) {
   try {
     await mkdir(config.home, { recursive: true });

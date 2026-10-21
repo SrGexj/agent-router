@@ -53,7 +53,7 @@ export function reduceRun(run, ev) {
       status: "running", startedAt: ev.t, endedAt: null, exitCode: null,
       mainModel: null, orchestratorActiveAt: null, lastText: "",
       tasks: {}, taskOrder: [], pending: [], quota: null, usage: null, orchestratorUsage: null, errors: [], limit: null,
-      waiting: null, asked: [], shadow: null, blockedCount: 0, layaDecisions: 0, layaApplied: 0, updatedAt: ev.t
+      waiting: null, asked: [], shadow: null, blockedCount: 0, directEdits: ev.directEdits ?? 0, layaDecisions: 0, layaApplied: 0, updatedAt: ev.t
     };
   }
   if (!run) return null;
@@ -76,6 +76,9 @@ export function reduceRun(run, ev) {
     }
     case "task_request":
       return { ...base, pending: [...(base.pending ?? []), { agent: ev.agent, description: ev.description, prompt: ev.prompt }] };
+    case "direct_edit":
+      // Total acumulado de la sesión (los hooks son procesos sueltos: lo cuenta el hook y lo lleva el evento).
+      return { ...base, directEdits: ev.n ?? (base.directEdits ?? 0) + 1 };
     case "task_blocked":
       return { ...base, blockedCount: (base.blockedCount ?? 0) + 1 };
     case "laya_decision":
@@ -153,7 +156,7 @@ export function reduceRun(run, ev) {
       return { ...base, compactions: [...(base.compactions ?? []), { trigger: ev.trigger ?? null, pendingCount: ev.pendingCount ?? 0, t: ev.t }] };
     case "context":
       // Contexto actual (último turno) según la statusline; se sobrescribe en cada cambio.
-      return { ...base, context: { tokens: ev.tokens, model: ev.model ?? null, window: ev.window ?? null, t: ev.t } };
+      return { ...base, context: { tokens: ev.tokens, model: ev.model ?? null, window: ev.window ?? null, ...(ev.relevoAt > 0 && { relevoAt: ev.relevoAt }), t: ev.t } };
     case "compact_stats": {
       // Datos del límite de compactación leídos del transcript; upsert por id (el mismo límite puede llegar dos veces).
       const byId = new Map((base.compactStats ?? []).map((c) => [c.id, c]));

@@ -27,6 +27,9 @@ export function createSessions({ dir }) {
     async loadQuota(id) { return readJson(`${checkId(id)}.quota.json`, null); },
     async saveQuota(id, quota) { return writeJson(`${checkId(id)}.quota.json`, quota); },
     async loadContext(id) { return readJson(`${checkId(id)}.context.json`, null); },
-    async saveContext(id, ctx) { return writeJson(`${checkId(id)}.context.json`, ctx); }
+    async saveContext(id, ctx) { return writeJson(`${checkId(id)}.context.json`, ctx); },
+    // Marcas que sobreviven a las ejecuciones (cada mensaje abre una): aviso de relevo ya dado y ediciones directas del orquestador.
+    async loadFlags(id) { return readJson(`${checkId(id)}.flags.json`, { relevoAsked: false, directEdits: 0 }); },
+    async saveFlags(id, flags) { return writeJson(`${checkId(id)}.flags.json`, flags); }
   };
 }

@@ -120,7 +120,7 @@ describe("relevo: avisos de compaction.mjs", () => {
 
 describe("relevo: instalación y prompt", () => {
   it("SessionStart corre tras compactar y al arrancar", () => {
-    const s = buildCoSettings({ node: "/n", root: "/r" });
+    const s = buildCoSettings({ node: "/n", appRoot: "/r" });
     expect(s.hooks.SessionStart.map((h) => h.matcher).sort()).toEqual(["compact", "startup"]);
     for (const h of s.hooks.SessionStart) expect(h.hooks[0].command).toBe("\"/n\" \"/r/bin/router-hook.mjs\"");
   });

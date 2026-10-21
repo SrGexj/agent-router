@@ -36,7 +36,7 @@ Después abre una terminal nueva y usa `co`.
 
 El instalador:
 
-- Construye el dashboard si falta (`dashboard/dist`).
+- Crea la copia estable `~/.agent-router/app` (ver "Copia estable") y deja ahí el dashboard construido.
 - Escribe los hooks y la statusline de `co` en `~/.agent-router/co-settings.json`.
 - Mantiene tu statusline: su comando se guarda en `~/.agent-router/statusline-next` y se sigue mostrando en `co`.
 - Enlaza `asistente.md` y `programador.md` en `~/.claude/agents`. No pisa los que ya existan.
@@ -50,6 +50,14 @@ Avisos:
 - Reinstalar reinicia el servicio del dashboard y corta las sesiones `co` que estén en curso.
 - Si cambias de versión de Node con nvm, vuelve a ejecutar `npm run instalar`: el servicio usa la ruta del Node con el que se instaló.
 
+## Copia estable
+
+Los hooks, la statusline, el servicio del dashboard, los enlaces de los agentes y `~/bin/router` no apuntan a este repo sino a `~/.agent-router/app`: un `git worktree` de `main` en HEAD desatado, con sus `node_modules` de producción y el `dashboard/dist` ya construido. Así, cambiar de rama o dejar un merge a medias aquí no rompe las sesiones `co` y `cop` en marcha (las dos usan el mismo `co-settings.json` y la misma copia).
+
+- Actualizar a `origin/main` (hace `git fetch origin`; sin red usa el `main` local y avisa): `router actualizar` (o `npm run instalar -- --actualizar`). Mueve la copia, reconstruye y reinicia el dashboard.
+- No edites nada dentro de `~/.agent-router/app`: si tiene cambios sin confirmar, la actualización y la desinstalación paran y avisan.
+- Las sesiones `co` ya abiertas siguen con la copia anterior hasta que las cierres.
+
 ## Desinstalación
 
 ```bash
@@ -60,7 +68,8 @@ Quita:
 
 - El bloque de `co` del rc (con copia previa).
 - Los servicios del dashboard y de Laya.
-- Los enlaces de los agentes y `~/bin/router`, solo si apuntan a este proyecto.
+- Los enlaces de los agentes y `~/bin/router`, solo si apuntan a este proyecto o a la copia estable.
+- La copia estable `~/.agent-router/app` (`git worktree remove`; si tiene cambios sin confirmar, avisa y la deja).
 - `co-settings.json` y `statusline-next`.
 
 No borra:

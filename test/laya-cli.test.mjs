@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtemp, rm, readFile, writeFile, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { parseLayaArgs, isLayaCommand, USAGE } from "../src/core/cli.mjs";
+import { parseLayaArgs, isLayaCommand, isActualizarCommand, USAGE } from "../src/core/cli.mjs";
 import { loadConfig } from "../src/config.mjs";
 import { createStore } from "../src/core/store.mjs";
 import { createPlatform } from "../src/core/platform/index.mjs";
@@ -239,5 +239,13 @@ describe("laya-usar", () => {
     const res = await layaUsar({ config, opts: { dir: null, remove: true }, log });
     expect(res.ok).toBe(true);
     await expect(readFile(config.laya.activeFile, "utf8")).rejects.toThrow();
+  });
+});
+
+describe("router actualizar", () => {
+  it("se reconoce como subcomando exacto y sale en la ayuda", () => {
+    expect(isActualizarCommand("actualizar")).toBe(true);
+    expect(isActualizarCommand("actualiza el README")).toBe(false);
+    expect(USAGE).toMatch(/router actualizar/);
   });
 });

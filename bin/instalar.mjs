@@ -8,7 +8,7 @@ import { copyFile, mkdir, readFile, rename, symlink, unlink, writeFile } from "n
 import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadConfig, saveConfigEnv } from "../src/config.mjs";
-import { buildCoSettings, layaInstallPlan, layaServiceSpec, pickPython, serverServiceSpec, withZshBlock as withShellBlock, withoutZshBlock as withoutShellBlock } from "../src/core/install.mjs";
+import { buildCoSettings, planStatuslineChain, layaInstallPlan, layaServiceSpec, pickPython, serverServiceSpec, withZshBlock as withShellBlock, withoutZshBlock as withoutShellBlock } from "../src/core/install.mjs";
 import { realDeps, selectPlatform } from "../src/core/platform/index.mjs";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url)).replace(/\/$/, "");
@@ -90,14 +90,14 @@ async function install() {
   await writeFile(paths.settings, JSON.stringify(buildCoSettings({ node, root: ROOT }), null, 2) + "\n");
   log(`hooks y statusline de co: ${paths.settings}`);
 
+  let userCmd;
   try {
-    const user = JSON.parse(await readFile(join(H, ".claude/settings.json"), "utf8"));
-    const cmd = user.statusLine?.command;
-    if (cmd && !cmd.includes("router-statusline")) {
-      await writeFile(paths.next, cmd + "\n");
-      log(`tu statusline se sigue mostrando en co: ${cmd}`);
-    }
-  } catch { log("sin statusline propia: co mostrará una mínima con la cuota"); }
+    userCmd = JSON.parse(await readFile(join(H, ".claude/settings.json"), "utf8")).statusLine?.command;
+  } catch { /* sin settings legibles */ }
+  const existingNext = existsSync(paths.next) ? await readFile(paths.next, "utf8") : null;
+  const chain = planStatuslineChain({ userCmd, existingNext });
+  if (chain.write) await writeFile(paths.next, chain.chained + "\n");
+  log(chain.chained ? `Statusline encadenada: ${chain.chained}` : "sin statusline propia: co mostrará una mínima con la cuota");
 
   for (const a of paths.agents) await linkSafe(a.link, a.target);
   await linkSafe(paths.routerBin, join(ROOT, "bin/router.mjs"), { backupForeign: true });

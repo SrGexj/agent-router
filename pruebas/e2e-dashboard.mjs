@@ -101,7 +101,6 @@ try {
   // 2. Una ejecución real del router (con claude falso) aparece en vivo.
   const router = spawn("node", [join(ROOT, "bin/router.mjs"), "Tarea de prueba e2e"], { cwd: home, env, stdio: ["ignore", "pipe", "pipe"] });
   children.push(router);
-  
   await waitText("Tarea de prueba e2e");
   await page.waitForSelector(".run-pill.on", { timeout: 5000 }).catch(() => fail("No aparece la pastilla de la ejecución en curso"));
   console.log("✓ ejecución en vivo con su pastilla");
@@ -123,7 +122,7 @@ try {
   await page.evaluate(() => { window.__now = Date.now; Date.now = () => window.__now() + 600_000; });
   await page.evaluate(() => new Promise((r) => setTimeout(r, 400)));
   const kept = await page.$eval(".card", (el) => el.innerText);
-  for (const t of ["HISTORIAL", "Terminada", "Haiku 5.5 · 1 encargo", "0,21 $"]) {
+  for (const t of ["historial", "Terminada", "Haiku 5.5 · 1 encargo", "0,21 $"]) {
     if (!kept.includes(t)) fail(`La escena terminada pierde "${t}" pasado el tiempo:\n${kept}`);
   }
   if (kept.includes("EN ESPERA") || kept.includes("Libre")) fail(`La escena terminada vuelve a reposo:\n${kept}`);
@@ -169,7 +168,7 @@ try {
   if (page0.includes("<pasted_content")) fail("El título deja ver la etiqueta <pasted_content");
   const runsText = await page.$eval(".runs", (el) => el.innerText);
   if (!runsText.includes("[texto pegado] Retoma el trabajo de ayer")) fail(`Título de la lista sin limpiar:\n${runsText}`);
-  if (!/pregunta/.test(runsText)) fail("La lista no marca la ejecución como pregunta");
+  if (!/espera respuesta/.test(runsText)) fail("La lista no marca la ejecución como pregunta");
   await page.waitForFunction(() => document.querySelector(".run-pill.waiting, .run-pill.on")?.innerText.includes("espera respuesta"), { timeout: 5000 }).catch(() => fail("La pastilla no avisa de la pregunta"));
   const share = await page.$eval(".split", (el) => el.innerText);
   if (!/gasto/i.test(share) || /—/.test(share)) fail(`La barra de gasto no refleja los datos de uso:\n${share}`);
@@ -433,10 +432,10 @@ try {
     // La ejecución llega por el socket en cuanto el servidor lee el archivo: puede aparecer en la lista a medias y recolocarse
     // (En curso -> Terminadas) al llegar el resto. Se repite el clic hasta que la vista cambie, en vez de fiarlo a un solo clic.
     await page.waitForFunction(() => {
-      if (document.querySelector(".badge em")?.textContent === "final-1") return true;
+      if (document.querySelector(".runs button.sel .rtask")?.textContent === "Resumen final de gasto") return true;
       [...document.querySelectorAll(".runs .rtask")].find((e) => e.textContent === "Resumen final de gasto")?.closest("button").click();
       return false;
-    }, { timeout: 10_000, polling: 250 }).catch(async () => fail(`No se selecciona final-1. badge=${await page.$eval(".badge", (e) => e.outerHTML)} sel=${await page.$$eval(".runs button.sel .rtask", (e) => e.map((x) => x.textContent))}`));
+    }, { timeout: 10_000, polling: 250 }).catch(async () => fail(`No se selecciona final-1. sel=${await page.$$eval(".runs button.sel .rtask", (e) => e.map((x) => x.textContent))}`));
     // Y a que el archivo se haya leído entero (si se eligió a medias, la escena aún no trae el resumen).
     await page.waitForFunction(() => document.querySelector(".card")?.innerText.includes("2 encargos · 4,50 $"), { timeout: 10_000 }).catch(() => {});
     await page.evaluate(() => new Promise((r) => setTimeout(r, 200)));
@@ -460,7 +459,7 @@ try {
     await waitText("Escena con Laya en vivo");
     await page.setViewport({ width: 1280, height: 1100 });
     await page.$$eval(".runs .rtask", (els) => els.find((e) => e.textContent === "Escena con Laya en vivo").closest("button").click());
-    await page.waitForFunction(() => document.querySelector(".badge em")?.textContent === "laya-1", { timeout: 5000 });
+    await page.waitForFunction(() => document.querySelector(".runs button.sel .rtask")?.textContent === "Escena con Laya en vivo", { timeout: 5000 });
     const scene = () => page.$eval(".scene", (el) => el.innerText);
     const waitScene = (needle) => page.waitForFunction((n) => document.querySelector(".scene")?.innerText.includes(n), { timeout: 8000 }, needle)
       .catch(async () => fail(`No aparece "${needle}" en la escena:\n${await scene()}`));

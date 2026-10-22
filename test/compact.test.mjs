@@ -79,7 +79,7 @@ describe("shadowLines", () => {
     expect(d).toContain("estimación gruesa");
     expect(d).toContain("no incluye 2 de Otro");
     expect(d).toContain("Datos para entrenar: 5 (1 corregida)");
-    expect(d).toContain("opus 1");
+    expect(d).toContain("orquestador 1");
   });
   it("coste negativo dice costaría; sin n no hay bloque", () => {
     expect(shadowLines({ ...sh, savingsUsd: -1 }).detail.join()).toContain("costaría");

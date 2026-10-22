@@ -36,7 +36,7 @@ export function shadowLines(sh) {
     `${sh.savingsUsd >= 0 ? "ahorraría" : "costaría"} ~${fmtCostFine(Math.abs(sh.savingsUsd))} · coste ${sh.name} ${fmtCostFine(sh.jevCostUsd)}${sh.errors ? ` · ${sh.errors} ${sh.errors === 1 ? "fallo" : "fallos"}` : ""} · estimación gruesa`
   ];
   if (sh.others?.length > 0) detail.push(`(no incluye ${sh.others.map((o) => `${o.n} de ${o.name}`).join(" ni ")})`);
-  if (tr && tr.n > 0) detail.push(`Datos para entrenar: ${tr.n} (${tr.corrected} ${tr.corrected === 1 ? "corregida" : "corregidas"}) · asistente ${tr.byLabel.asistente} · programador ${tr.byLabel.programador} · opus ${tr.byLabel.opus}`);
+  if (tr && tr.n > 0) detail.push(`Datos para entrenar: ${tr.n} (${tr.corrected} ${tr.corrected === 1 ? "corregida" : "corregidas"}) · asistente ${tr.byLabel.asistente} · programador ${tr.byLabel.programador} · orquestador ${tr.byLabel.opus}`);
   return { name: sh.name, pct: `${Math.round(sh.matchPct)} %`, ratio: `(${sh.matches}/${sh.n})`, title: `${sh.name} en sombra: acierta ${sh.matches} de ${sh.n}`, summary: `Detalle ${sh.name}`, detail };
 }
 

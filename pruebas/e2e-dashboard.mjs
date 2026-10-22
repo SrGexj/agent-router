@@ -334,12 +334,12 @@ try {
     };
     await open("Sombra no coincide");
     const noMatch = await page.$eval(".detail", (el) => el.innerText);
-    for (const t of ["Clasificador en sombra (Jev)", "Jev eligió: Asistente (85 %)", "Opus hizo: Programador", "no coincide", "Cambio mecánico de texto", "Latencia 0,6 s", "Si se le hubiera hecho caso", "ahorro", "estimación"]) {
+    for (const t of ["Clasificador en sombra (Jev)", "Jev eligió: Asistente (85 %)", "Real: Programador", "no coincide", "Cambio mecánico de texto", "Latencia 0,6 s", "Si se le hubiera hecho caso", "ahorro", "estimación"]) {
       if (!noMatch.includes(t)) fail(`Falta "${t}" en el bloque de sombra:\n${noMatch}`);
     }
     await open("Sombra coincide");
     const match = await page.$eval(".detail", (el) => el.innerText);
-    if (!match.includes("Jev eligió: Opus (92 %)") || !/Opus hizo: Opus\s*→\s*coincide/.test(match)) fail(`Bloque de sombra sin coincidencia:\n${match}`);
+    if (!match.includes("Jev eligió: Orquestador (Opus) (92 %)") || !/Real: Orquestador \(Opus\)\s*→\s*coincide/.test(match)) fail(`Bloque de sombra sin coincidencia:\n${match}`);
     await open("Sombra con error");
     const err = await page.$eval(".detail", (el) => el.innerText);
     if (!err.includes("timeout") || err.includes("Jev eligió")) fail(`Bloque de sombra con error incorrecto:\n${err}`);

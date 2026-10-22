@@ -40,7 +40,7 @@ const paths = {
   rc: platform.shellRcPath(),
   layaVenv: join(config.home, "laya-venv"),
   routerBin: join(H, "bin/router"),
-  agents: ["asistente", "programador"].map((n) => ({ link: join(H, ".claude/agents", `${n}.md`), target: appFiles.agent(n), legacy: [join(ROOT, "src/agents", `${n}.md`)] }))
+  agents: ["asistente", "programador", "consultor"].map((n) => ({ link: join(H, ".claude/agents", `${n}.md`), target: appFiles.agent(n), legacy: [join(ROOT, "src/agents", `${n}.md`)] }))
 };
 // Destinos antiguos (el repo de desarrollo) que se migran a la copia al reinstalar y que el desinstalador también reconoce.
 const legacyRouter = [join(ROOT, "bin/router.mjs")];

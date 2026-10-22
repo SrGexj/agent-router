@@ -30,6 +30,7 @@ describe("decideRouting (tabla)", () => {
     ["downgrade", "programador", res("opus", 0.99), 0.9, false, "nunca sube"],
     ["downgrade", "asistente", res("opus", 0.99), 0.9, false, "nunca sube desde asistente"],
     ["downgrade", "asistente", res("asistente", 0.99), 0.9, false, "asistente no se toca"],
+    ["downgrade", "consultor", res("asistente", 0.99), 0.9, false, "consultor no se baja"],
     ["downgrade", "Explore", res("asistente", 0.99), 0.9, false, "otros tipos no se tocan"],
     ["downgrade", "general-purpose", res("asistente", 0.99), 0.9, false, "general-purpose no se toca"],
     ["downgrade", "programador", null, 0.9, false, "timeout/error"]

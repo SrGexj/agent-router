@@ -57,15 +57,13 @@ export function orchestratorSub(run) {
   return familyName(run?.mainModel) ?? familyName(o.models[0]) ?? "Orquestador";
 }
 
-// Bajo el orquestador: sus subagentes propios (Explore, general-purpose, Plan...), que no van a los nodos de rol.
-// "+1 Explore en curso" mientras trabajan (varios tipos: "+3 subagentes en curso") y "subagentes: N" al acabar.
-export function ownSubagentsLine(run) {
-  const own = tasksOf(run).filter((t) => t.node === "propio");
-  if (own.length === 0) return null;
-  const running = own.filter((t) => t.status === "running");
-  if (running.length === 0) return `subagentes: ${own.length}`;
-  const types = [...new Set(running.map((t) => t.agent))];
-  return `+${running.length} ${types.length === 1 ? types[0] : "subagentes"} en curso`;
+// Nodo "Otros": tipos de subagente que no son del equipo (Explore, Plan, general-purpose...) con cuántos hubo de cada uno,
+// para el tooltip: "Explore ×2, Plan". null sin ninguno.
+export function ownTypes(run) {
+  const counts = new Map();
+  for (const t of tasksOf(run).filter((t) => t.node === "propio")) counts.set(t.agent, (counts.get(t.agent) ?? 0) + 1);
+  if (counts.size === 0) return null;
+  return [...counts].map(([agent, n]) => (n > 1 ? `${agent} ×${n}` : agent)).join(", ");
 }
 
 // Tras este tiempo sin respuesta de Laya en una ejecución en curso se deja de esperarla (sombra desactivada o caída).
@@ -138,10 +136,12 @@ export function captionFor(phase, run, now) {
     case "delega": {
       const p = tasks.filter((t) => t.node === "programador").length;
       const a = tasks.filter((t) => t.node === "asistente").length;
-      const o = tasks.length - p - a;
+      const k = tasks.filter((t) => t.node === "consultor").length;
+      const o = tasks.length - p - a - k;
       const parts = [];
       if (p) parts.push(`${p} a Programador (Sonnet)`);
       if (a) parts.push(`${a} a Asistente (Haiku)`);
+      if (k) parts.push(`${k} a Consultor (Opus)`);
       if (o) parts.push(`${o} ${o === 1 ? "subagente propio" : "subagentes propios"} de ${orchestratorName(run)}`);
       return { title: "Reparto", text: `${plural(tasks.length, "encargo", "encargos")}: ${parts.join(" y ")}.`, tone: "normal" };
     }

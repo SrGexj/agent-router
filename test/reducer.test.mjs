@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { reduceRun, reduceEvents, nodeFor } from "../src/core/reducer.mjs";
+import { reduceRun, reduceEvents, nodeFor, WORKERS } from "../src/core/reducer.mjs";
 import { workerView } from "../src/core/view.mjs";
 
 const start = { type: "run_start", runId: "r1", task: "Añade validación", mode: "orquestado", model: "opus", cwd: "/x", t: 0 };
@@ -170,6 +170,11 @@ describe("nodeFor", () => {
     expect(nodeFor("Explore", "claude-opus-5-5")).toBe("propio");
     expect(nodeFor("general-purpose", "claude-sonnet-5-5")).toBe("propio");
     expect(nodeFor("Plan", null)).toBe("propio");
+  });
+  it("consultor (Opus, solo lectura) tiene su propio nodo, sea cual sea el modelo", () => {
+    expect(nodeFor("consultor", null)).toBe("consultor");
+    expect(nodeFor("consultor", "claude-opus-5-5")).toBe("consultor");
+    expect(WORKERS).toEqual(["asistente", "programador", "consultor"]);
   });
   it("ejecución antigua sin tipo de agente: se decide por modelo como antes", () => {
     expect(nodeFor(undefined, "claude-haiku-5-5")).toBe("asistente");

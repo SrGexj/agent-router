@@ -12,7 +12,7 @@ export function decideBlock(payload, blockedAgents) {
   if (!blockedAgents.some((b) => b.toLowerCase() === agent.toLowerCase())) return null;
   return {
     agent,
-    reason: `Bloqueado por agent-router: ${agent} corre en Opus. Relanza con subagent_type "asistente" (Haiku: docs, web, navegador, comprobaciones) o "programador" (Sonnet: código). Si de verdad necesita Opus, pídeselo al usuario.`
+    reason: `Bloqueado por agent-router: ${agent} corre en Opus. Relanza con subagent_type "asistente" (Haiku: docs, web, navegador, comprobaciones) o "programador" (Sonnet: código). Si hace falta Opus, usa subagent_type "consultor" (Opus, solo lectura: decisiones de diseño o riesgo). Para otro uso de Opus, pídeselo al usuario.`
   };
 }
 

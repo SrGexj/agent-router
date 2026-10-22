@@ -210,7 +210,8 @@ const ROLES = [
   ["orchestrator", "Orquestador"],
   ["programador", "Programador (Sonnet)"],
   ["asistente", "Asistente (Haiku)"],
-  ["propio", "Subagentes propios (Explore…)"]
+  ["consultor", "Consultor (Opus)"],
+  ["propio", "Otros (Explore…)"]
 ];
 
 function Waiting({ run }) {
@@ -328,7 +329,7 @@ function Shadow({ run }) {
 }
 
 function Spend({ b, run }) {
-  const roles = ROLES.filter(([k]) => k !== "propio" || b[k].tokens > 0);
+  const roles = ROLES.filter(([k]) => !["consultor", "propio"].includes(k) || b[k].tokens > 0);
   const max = Math.max(...roles.map(([k]) => b[k].costUsd), 0.000001);
   return (
     <div className="dspend">
@@ -404,7 +405,7 @@ function Context({ run, b, now }) {
 }
 
 const TASK_STATUS_OPTS = [["all", "Todos"], ["running", "En curso"], ["completed", "Completados"], ["failed", "Fallidos"]];
-const TASK_AGENT_OPTS = [["all", "Todos"], ["asistente", "Asistente"], ["programador", "Programador"], ["propio", "Propios"]];
+const TASK_AGENT_OPTS = [["all", "Todos"], ["asistente", "Asistente"], ["programador", "Programador"], ["consultor", "Consultor"], ["propio", "Otros"]];
 const NO_TASK_FILTER = { text: "", status: "all", agent: "all" };
 
 // Con key={run.id} desde el padre: al cambiar de ejecución los filtros se reinician.

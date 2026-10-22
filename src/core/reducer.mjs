@@ -3,14 +3,14 @@
 
 import { addUsage, emptyUsage } from "./pricing.mjs";
 
-export const WORKERS = ["asistente", "programador"];
+export const WORKERS = ["asistente", "programador", "consultor"];
 const ROUTE_LABELS = ["asistente", "programador", "opus"];
 
-// Subagentes que no son de los roles (Explore, general-purpose, Plan...): cuelgan del orquestador.
+// Subagentes que no son del equipo (Explore, general-purpose, Plan...): nodo "Otros". El id "propio" se conserva por los runs guardados.
 export const OWN = "propio";
 
-// Nodo de un encargo según el tipo de subagente. Solo "asistente" y "programador" van a sus nodos; cualquier otro
-// tipo es del orquestador. Sin tipo (ejecuciones antiguas) se decide por el modelo, como antes.
+// Nodo de un encargo según el tipo de subagente. "asistente", "programador" y "consultor" van a sus nodos; cualquier otro
+// tipo (Explore, Plan, general-purpose...) va al nodo "Otros" (OWN). Sin tipo (ejecuciones antiguas) se decide por el modelo, como antes.
 export function nodeFor(agent, model) {
   if (WORKERS.includes(agent)) return agent;
   if (agent) return OWN;

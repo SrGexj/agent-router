@@ -542,6 +542,23 @@ describe("gasto por modelo real, no por rol", () => {
     expect(spendUnknown(r)).toEqual({ opus: true, sonnet: true, haiku: false });
     expect(spendUnknown(mkRun([explore({ "claude-opus-5-5": u(1) })]))).toEqual({ opus: false, sonnet: false, haiku: false });
   });
+  it("el desglose por rol separa el consultor (Opus) de programador y propios", () => {
+    const r = mkRun([task("consultor", "claude-opus-5-5", { "claude-opus-5-5": u(M) }, { agent: "consultor" })], { orchestratorUsage: orch });
+    const b = costBreakdown(r);
+    expect(b.consultor.costUsd).toBeCloseTo(4);
+    expect(b.programador.costUsd).toBe(0);
+    expect(b.propio.costUsd).toBe(0);
+    expect(b.total).toBeCloseTo(8);
+    expect(spendShare(r)).toEqual({ opus: 100, sonnet: 0, haiku: 0 });
+  });
+  it("spendUnknown: un consultor sin uso ni modelo es desconocido en Opus", () => {
+    const r = mkRun([task("consultor", null, undefined, { status: "running" })]);
+    expect(spendUnknown(r)).toEqual({ opus: true, sonnet: false, haiku: false });
+  });
+  it("actualRoute: el consultor lo lleva Opus, como los propios", () => {
+    expect(actualRoute(mkRun([task("consultor", "claude-opus-5-5", undefined)]))).toBe("opus");
+    expect(actualRoute(mkRun([task("consultor", "claude-opus-5-5", undefined), task("asistente", "claude-haiku-5-5", undefined)]))).toBe("asistente");
+  });
   it("actualRoute: solo subagentes propios = lo llevó Opus", () => {
     expect(actualRoute(mkRun([explore(undefined)]))).toBe("opus");
   });

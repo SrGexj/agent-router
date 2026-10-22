@@ -25,7 +25,8 @@ export function buildCoSettings({ node, appRoot }) {
     autoCompactWindow: CO_AUTOCOMPACT_WINDOW,
     // Los subagentes con isolation "worktree" escriben en .claude/worktrees/, que Claude Code protege:
     // sin esto cada escritura pide permiso. Solo afecta a las sesiones co (este archivo va por --settings).
-    permissions: { allow: ["Edit(**/.claude/worktrees/**)"] },
+    // `git branch -d` solo borra ramas ya mergeadas (git se niega si no), así que es seguro sin preguntar; -D no se permite.
+    permissions: { allow: ["Edit(**/.claude/worktrees/**)", "Bash(git branch -d *)"] },
     // refreshInterval: Esc no dispara hooks; la statusline mira el transcript cada 2 s para cerrar la ejecución.
     statusLine: { type: "command", command: cmd(node, `${appRoot}/bin/router-statusline.mjs`), padding: 0, refreshInterval: 2 }
   };

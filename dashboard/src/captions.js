@@ -50,7 +50,7 @@ const familyName = (model) => {
 // Bajo el orquestador: solo el modelo ("Opus"); coste y tokens van en la tarjeta de gasto/uso. null sin datos de uso suyos.
 export function orchestratorSub(run) {
   const o = costBreakdown(run).orchestrator;
-  if (o.tokens <= 0) return null;
+  if (o.tokens <= 0) return familyName(run?.mainModel); // sin uso aún: el modelo real que anotó el hook (co --model sonnet)
   return familyName(o.models[0]) ?? "Opus";
 }
 
@@ -108,7 +108,8 @@ export function workerSub(run, node, fallback) {
   if (v.total === 0) return run?.endedAt != null ? fallback : `${fallback} · sin encargos`; // terminada: el pill ya dice "Sin encargos"
   const part = costBreakdown(run)[node];
   const tokens = part.tokens || v.tokens;
-  const parts = [fmtModel(v.model ?? "") === "—" ? fallback : fmtModel(v.model), plural(v.total, "encargo", "encargos")];
+  const model = fmtModel(v.model || null);
+  const parts = [model === "—" ? fallback : model, plural(v.total, "encargo", "encargos")];
   if (part.costUsd > 0) parts.push(fmtCost(part.costUsd));
   if (tokens) parts.push(`${fmtTokens(tokens)} tok`);
   return parts.join(" · ");

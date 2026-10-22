@@ -352,6 +352,35 @@ describe("coste real desde transcripts", () => {
   });
 });
 
+describe("modelo real del orquestador (main_model)", () => {
+  it("lastModelOf: modelo del último assistant principal, sin subagentes ni sintéticos", async () => {
+    const { lastModelOf } = await import("../src/core/usage.mjs");
+    const line = (o) => JSON.stringify({ type: "assistant", message: { id: o.id, model: o.model, usage: { input_tokens: 1, output_tokens: 1 } }, ...(o.side && { isSidechain: true }) });
+    const text = [line({ id: "1", model: "claude-opus-5-5" }), line({ id: "2", model: "claude-sonnet-5-5" }), line({ id: "3", model: "claude-haiku-5-5", side: true }), line({ id: "4", model: "<synthetic>" })].join("\n");
+    expect(lastModelOf(text)).toBe("claude-sonnet-5-5");
+    expect(lastModelOf("")).toBeNull();
+  });
+
+  it("Stop con ctx.mainModel emite main_model antes de run_end; una vez por valor en vivo", () => {
+    const ctx = { mainModel: "claude-sonnet-5-5" };
+    expect(hook({ hook_event_name: "Stop", background_tasks: [] }, open1(), ctx).events).toEqual([{ type: "main_model", model: "claude-sonnet-5-5", t: T }, { type: "run_end", exitCode: 0, t: T }]);
+    const live = { ...ctx, orchestratorUsage: usage("claude-sonnet-5-5", 2), usageState: { offset: 9, byModel: {}, recent: [] } };
+    const res = hook({ hook_event_name: "PostToolUse", tool_name: "Bash" }, open1(), live);
+    expect(res.events.map((e) => e.type).sort()).toEqual(["main_model", "orchestrator_usage"]);
+    expect(res.session.mainModel).toBe("claude-sonnet-5-5");
+    const again = hook({ hook_event_name: "PostToolUse", tool_name: "Bash" }, { ...res.session, lastUsageAt: 0 }, live);
+    expect(again.events.map((e) => e.type)).toEqual(["orchestrator_usage"]);
+  });
+
+  it("run_start model fijo no pisa el main_model real en el reducer", () => {
+    const run = reduceEvents([
+      { type: "run_start", runId: "r", task: "x", mode: "sesion", model: "opus", cwd: "/", t: 0 },
+      { type: "main_model", model: "claude-sonnet-5-5", t: 1 }
+    ]);
+    expect(run.mainModel).toBe("claude-sonnet-5-5");
+  });
+});
+
 describe("gasto del orquestador en vivo", () => {
   const ctx = (n = 4) => ({ orchestratorUsage: usage("claude-opus-5-5", n), usageState: { offset: 99, byModel: {}, recent: [] } });
   const post = { hook_event_name: "PostToolUse", tool_name: "Bash" };

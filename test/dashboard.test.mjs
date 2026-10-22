@@ -211,6 +211,16 @@ describe("resumen final de una ejecución", () => {
     expect(orchestratorSub(null)).toBeNull();
   });
 
+  it("orchestratorSub: sin uso cae al modelo anotado por main_model (co --model sonnet)", () => {
+    const run = reduceEvents([start, { type: "main_model", model: "claude-sonnet-5-5", t: 1 }]);
+    expect(orchestratorSub(run)).toBe("Sonnet");
+  });
+
+  it("workerSub: encargo sin modelo usa el modelo de reserva del rol", () => {
+    const run = reduceEvents([start, { type: "task_start", taskId: "a", agent: "asistente", description: "", prompt: "", t: 1 }]);
+    expect(workerSub(run, "asistente", "Haiku")).toBe("Haiku · 1 encargo");
+  });
+
   it("Explore en Opus: el Programador no lo cuenta ni toma su modelo; el orquestador lo muestra aparte", () => {
     const evs = [
       start,

@@ -12,7 +12,7 @@ import { interruptedIn, liveAgentUsageDue, liveUsageDue, translateHook } from ".
 import { MAX_FULL, readFrom, readSince, transcriptSize } from "../src/core/transcript.mjs";
 import { advanceContext, startContext } from "../src/core/context.mjs";
 import { summarizeSubagent } from "../src/core/subagent.mjs";
-import { advanceUsage, agentTranscriptPath, startUsage, usageFromTranscript } from "../src/core/usage.mjs";
+import { advanceUsage, agentTranscriptPath, lastModelOf, startUsage, usageFromTranscript } from "../src/core/usage.mjs";
 import { makeRunId } from "../src/core/run.mjs";
 import { reduceEvents } from "../src/core/reducer.mjs";
 import { compactionsFromTranscript } from "../src/core/compaction.mjs";
@@ -250,6 +250,7 @@ try {
     if (o) { ctx.orchestratorUsage = o.usage; ctx.usageState = o.state; }
     const c = await orchestratorContextOf(payload.transcript_path, session, now);
     if (c) { ctx.contextEvents = c.events; ctx.contextState = c.state; }
+    if (payload.transcript_path) ctx.mainModel = lastModelOf(await readSince(payload.transcript_path, 0, TAIL_BYTES).catch(() => ""));
   }
 
   const res = translateHook(payload, session, now, makeRunId, ctx);

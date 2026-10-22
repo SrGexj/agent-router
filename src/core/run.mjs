@@ -4,6 +4,7 @@ import { createInterface } from "node:readline";
 import { createParser } from "./parser.mjs";
 import { buildOrchestratorPrompt } from "./prompt.mjs";
 import { buildClaudeArgs } from "./cli.mjs";
+import { quotaSnapshot } from "./hooks.mjs";
 
 const pad = (n) => String(n).padStart(2, "0");
 
@@ -40,13 +41,15 @@ function terminalLine(ev, names) {
 
 export async function runTask({ task, mode, model, effort = null, agents = null, config, store, spawn, now, out, cwd = undefined, runId, signal = undefined, profile = "trabajo" }) {
   const quota = mode === "orquestado" ? await store.latestQuota(profile) : null;
+  // Cuota conocida al empezar (cualquier modo): referencia para medir cuánto gasta el run.
+  const startQuota = quotaSnapshot(mode === "orquestado" ? quota : await store.latestQuota(profile));
   const systemPrompt = mode === "orquestado" ? buildOrchestratorPrompt({ agents, quota, now: now() }) : null;
   const args = buildClaudeArgs({ mode, model, systemPrompt, agents, config, effort });
 
   const writes = [];
   // La cuota es de la cuenta (perfil) con la que corre claude.
   const emit = (ev) => { writes.push(store.append(runId, ev.type === "quota" ? { ...ev, profile } : ev)); };
-  emit({ type: "run_start", runId, task, mode, model, cwd: cwd ?? null, profile, t: now() });
+  emit({ type: "run_start", runId, task, mode, model, cwd: cwd ?? null, profile, quota: startQuota, t: now() });
 
   const parser = createParser();
   const names = new Map();
@@ -99,7 +102,8 @@ export async function runTask({ task, mode, model, effort = null, agents = null,
     emit({ type: "error", kind: "api", message: stderrTail.trim(), t: now() });
   }
 
-  const endEvent = { type: "run_end", exitCode, t: now() };
+  await Promise.all(writes); // la cuota del cierre incluye los eventos quota de este mismo run
+  const endEvent = { type: "run_end", exitCode, quota: quotaSnapshot(await store.latestQuota(profile)), mainModel: model, t: now() };
   if (cancelled) endEvent.status = "cancelled";
   emit(endEvent);
   await Promise.all(writes);

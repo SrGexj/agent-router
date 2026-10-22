@@ -330,7 +330,7 @@ describe("coste real desde transcripts", () => {
   it("Stop, StopFailure y SessionEnd emiten orchestrator_usage antes de run_end", () => {
     const ctx = { orchestratorUsage: usage("claude-opus-5-5", 9) };
     const ev = { type: "orchestrator_usage", ...usage("claude-opus-5-5", 9), t: T };
-    expect(hook({ hook_event_name: "Stop", background_tasks: [] }, open1(), ctx).events).toEqual([ev, { type: "run_end", exitCode: 0, t: T }]);
+    expect(hook({ hook_event_name: "Stop", background_tasks: [] }, open1(), ctx).events).toEqual([ev, { type: "run_end", exitCode: 0, byModel: ev.byModel, t: T }]);
     expect(hook({ hook_event_name: "StopFailure", error: "x" }, open1(), ctx).events.map((e) => e.type)).toEqual(["error", "orchestrator_usage", "run_end"]);
     expect(hook({ hook_event_name: "SessionEnd" }, open1(), ctx).events.map((e) => e.type)).toEqual(["orchestrator_usage", "run_end"]);
   });
@@ -363,7 +363,7 @@ describe("modelo real del orquestador (main_model)", () => {
 
   it("Stop con ctx.mainModel emite main_model antes de run_end; una vez por valor en vivo", () => {
     const ctx = { mainModel: "claude-sonnet-5-5" };
-    expect(hook({ hook_event_name: "Stop", background_tasks: [] }, open1(), ctx).events).toEqual([{ type: "main_model", model: "claude-sonnet-5-5", t: T }, { type: "run_end", exitCode: 0, t: T }]);
+    expect(hook({ hook_event_name: "Stop", background_tasks: [] }, open1(), ctx).events).toEqual([{ type: "main_model", model: "claude-sonnet-5-5", t: T }, { type: "run_end", exitCode: 0, mainModel: "claude-sonnet-5-5", t: T }]);
     const live = { ...ctx, orchestratorUsage: usage("claude-sonnet-5-5", 2), usageState: { offset: 9, byModel: {}, recent: [] } };
     const res = hook({ hook_event_name: "PostToolUse", tool_name: "Bash" }, open1(), live);
     expect(res.events.map((e) => e.type).sort()).toEqual(["main_model", "orchestrator_usage"]);

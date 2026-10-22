@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { loadConfig } from "../src/config.mjs";
 import { createStore } from "../src/core/store.mjs";
 import { loadAgents } from "../src/core/agents.mjs";
-import { parseCliArgs, isLayaCommand, isActualizarCommand, USAGE } from "../src/core/cli.mjs";
+import { parseCliArgs, isLayaCommand, isCuotaCommand, isActualizarCommand, USAGE } from "../src/core/cli.mjs";
 import { makeRunId, runTask } from "../src/core/run.mjs";
 import { buildOrchestratorPrompt } from "../src/core/prompt.mjs";
 
@@ -13,6 +13,11 @@ const AGENTS_DIR = fileURLToPath(new URL("../src/agents", import.meta.url));
 
 if (isLayaCommand(process.argv[2])) {
   const { main } = await import("./router-laya.mjs");
+  process.exit(await main(process.argv.slice(2)));
+}
+
+if (isCuotaCommand(process.argv[2])) {
+  const { main } = await import("./router-cuota.mjs");
   process.exit(await main(process.argv.slice(2)));
 }
 

@@ -13,6 +13,9 @@ Opciones:
   --prompt             Imprime el prompt del orquestador con la cuota actual (lo usa el alias co).
   -h, --help           Esta ayuda.
 
+Cuota por ejecución:
+  router cuota [--dias N] [--perfil P] [--detalle] [--aprox]   Puntos de cuota (5 h y 7 d) por día, orquestador y perfil; marca los runs no fiables.
+
 Copia estable:
   router actualizar                           Pasa ~/.agent-router/app a origin/main (fetch), reconstruye y reinicia el dashboard.
 
@@ -24,6 +27,33 @@ Ajustar Laya con tus datos:
   router laya-usar CARPETA | --quitar                                       Anota qué checkpoint usar y explica cómo aplicarlo.`;
 
 export const isActualizarCommand = (word) => word === "actualizar";
+
+export const isCuotaCommand = (word) => word === "cuota";
+
+// Argumentos de `router cuota`. Puro; lanza con un mensaje en castellano si algo no cuadra.
+export function parseCuotaArgs(argv) {
+  const [, ...rest] = argv;
+  const out = { days: null, profile: "todos", verbose: false, approx: false };
+  for (let i = 0; i < rest.length; i++) {
+    const a = rest[i];
+    const value = () => {
+      const v = rest[++i];
+      if (v == null || v.startsWith("--")) throw new Error(`Falta el valor de ${a}.`);
+      return v;
+    };
+    if (a === "--dias") {
+      const v = value();
+      if (!/^[1-9]\d*$/.test(v)) throw new Error(`Valor de --dias no válido: ${v} (entero positivo).`);
+      out.days = Number(v);
+    } else if (a === "--perfil") {
+      out.profile = value();
+      if (!/^[a-z0-9-]+$/i.test(out.profile)) throw new Error(`Valor de --perfil no válido: ${out.profile}.`);
+    } else if (a === "--detalle") out.verbose = true;
+    else if (a === "--aprox") out.approx = true;
+    else throw new Error(`Opción no válida para cuota: ${a}.`);
+  }
+  return out;
+}
 
 const LAYA_COMMANDS = new Set(["laya-datos", "laya-entrenar", "laya-usar"]);
 export const isLayaCommand = (word) => LAYA_COMMANDS.has(word);

@@ -4,23 +4,9 @@ import { boxFaces, isoCircle, iso, bezierPoint, bezierPath, easeInOut, shadowLin
 import { workerView } from "../../../src/core/view.mjs";
 import { spendShare, tokenShare, isWaiting, costBreakdown } from "../../../src/core/details.mjs";
 import { runContext, runBusy, contextAdvice } from "../../../src/core/compaction.mjs";
-import { fmtDuration, fmtCost, fmtTokens, usageTitle, layaNode, orchestratorSub, ownSubagentsLine, spendPending, workerSub } from "../captions.js";
+import { fmtDuration, fmtCost, fmtTokens, usageTitle, layaNode, orchestratorSub, ownTypes, spendPending, workerSub } from "../captions.js";
+import { VB, N, WORKERS, SIDE, EDGES } from "./layout.js";
 import { directEditsLine } from "../../../src/core/delegar.mjs";
-
-export const VB = { w: 960, h: 548 };
-
-const N = {
-  tu: { x: 205, y: 300 },
-  orq: { x: 430, y: 300 },
-  asistente: { x: 712, y: 226 },
-  programador: { x: 712, y: 402 }
-};
-
-const EDGES = {
-  in: [[N.tu.x + 22, N.tu.y - 16], [N.tu.x + 85, N.tu.y - 64], [N.orq.x - 80, N.orq.y - 64], [N.orq.x - 18, N.orq.y - 24]],
-  asistente: [[N.orq.x + 10, N.orq.y - 26], [N.orq.x + 70, N.orq.y - 100], [N.asistente.x - 150, N.asistente.y - 14], [N.asistente.x - 62, N.asistente.y - 6]],
-  programador: [[N.orq.x + 40, N.orq.y - 10], [N.orq.x + 120, N.orq.y + 2], [N.programador.x - 120, N.programador.y - 44], [N.programador.x - 44, N.programador.y - 20]]
-};
 
 const LINK = shadowLink(EDGES.in);
 
@@ -50,8 +36,8 @@ function Cube({ origin, center, state }) {
   return <Box origin={origin} box={{ x: center[0] - s / 2, y: center[1] - s / 2, z: 0, w: s, d: s, h: 13 }} className={`cube ${state}`} />;
 }
 
-function Worker({ id, slots }) {
-  const o = N[id];
+function Worker({ w, slots }) {
+  const o = w;
   return (
     <g>
       <Slab origin={o} w={116} d={100} h={14} />
@@ -200,8 +186,7 @@ export default function Scene({ run, phase, now, packets }) {
     if (el) el.scrollLeft = (el.scrollWidth - el.clientWidth) / 2;
   }, []);
   const live = run && !["entrega", "fallo", "limitado", "reposo"].includes(phase);
-  const asis = workerView(run, "asistente", now);
-  const prog = workerView(run, "programador", now);
+  const views = Object.fromEntries(WORKERS.map((w) => [w.id, workerView(run, w.id, now)]));
   const share = spendShare(run);
   const uso = tokenShare(run);
   const spend = costBreakdown(run).hasData ? costBreakdown(run).total : null;
@@ -213,14 +198,12 @@ export default function Scene({ run, phase, now, packets }) {
   const spin = !live ? "off" : ["recibe", "analiza", "delega", "revisa"].includes(phase) ? "fast" : "slow";
   const edgeClass = {
     in: phase === "fallo" || phase === "limitado" ? "edge err" : "edge",
-    asistente: asis.running === 0 && (asis.last?.status === "failed") && live ? "edge err" : "edge",
-    programador: prog.running === 0 && (prog.last?.status === "failed") && live ? "edge err" : "edge"
+    ...Object.fromEntries(WORKERS.map((w) => [w.id, views[w.id].running === 0 && views[w.id].last?.status === "failed" && live ? "edge err" : "edge"]))
   };
 
   const dots = [
     ...ambientDots("in", now, live && ["recibe", "analiza", "revisa"].includes(phase), 2200),
-    ...ambientDots("asistente", now, live && asis.running > 0),
-    ...ambientDots("programador", now, live && prog.running > 0)
+    ...WORKERS.flatMap((w) => ambientDots(w.id, now, live && views[w.id].running > 0))
   ];
 
   const pk = packets.map((p) => ({ ...p, pos: packetPoint(p, now) })).filter((p) => p.pos);
@@ -229,22 +212,23 @@ export default function Scene({ run, phase, now, packets }) {
     ? { dot: "ok", text: `1 tarea · ${fmtDuration(now - run.startedAt)}` }
     : { dot: "idle", text: !run ? "Sin tareas" : run.mode === "manual" ? `manual · ${run.model}` : run.mode === "sesion" ? "sesión co" : "router CLI" };
 
-  const A = { pill: workerPill(asis, run?.endedAt != null), sub: workerSub(run, "asistente", "Haiku") };
-  const P = { pill: workerPill(prog, run?.endedAt != null), sub: workerSub(run, "programador", "Sonnet") };
+  const texts = Object.fromEntries(WORKERS.map((w) => [w.id, {
+    pill: workerPill(views[w.id], run?.endedAt != null),
+    sub: workerSub(run, w.id, w.fallback),
+    tip: w.id === "propio" ? [w.tip, ownTypes(run)].filter(Boolean).join(": ") : null
+  }]));
   const orqSub = orchestratorSub(run);
-  const ownLine = ownSubagentsLine(run);
   const directLine = directEditsLine(run);
   const laya = layaNode(run, now);
   const spendNote = spendPending(run, share);
 
   return (
     <div className={`scene-scroll${share || uso || ctx ? " with-gauge" : ""}`} ref={scroller}>
-    <div className="scene">
-      <svg viewBox={`0 0 ${VB.w} ${VB.h}`} role="img" aria-label="Red de agentes: tú, orquestador, asistente y programador, con Laya en sombra">
+    <div className="scene" style={{ aspectRatio: `${VB.w} / ${VB.h}` }}>
+      <svg viewBox={`0 0 ${VB.w} ${VB.h}`} role="img" aria-label={`Red de agentes: tú, orquestador y ${WORKERS.map((w) => w.title.toLowerCase()).join(", ")}, con Laya en sombra`}>
         <You active={live} />
         <Orchestrator spin={spin} />
-        <Worker id="asistente" slots={asis.slots} />
-        <Worker id="programador" slots={prog.slots} />
+        {WORKERS.map((w) => <Worker key={w.id} w={w} slots={views[w.id].slots} />)}
 
         {Object.entries(EDGES).map(([id, c]) => <path key={id} className={edgeClass[id]} d={bezierPath(c)} />)}
         {laya && (
@@ -281,8 +265,7 @@ export default function Scene({ run, phase, now, packets }) {
         <Label x={N.orq.x} y={N.orq.y + 52} className="title">{manual ? <>Directo · {modelName(run.mainModel, run.model)}</> : <><Spark />Orquestador</>}</Label>
         <Label x={N.orq.x} y={N.orq.y + 76}><Pill dot={orqPill.dot}>{orqPill.text}</Pill></Label>
         {orqSub && <Label x={N.orq.x} y={N.orq.y + 98} className="sub orq-sub">{orqSub}</Label>}
-        {ownLine && <Label x={N.orq.x} y={N.orq.y + (orqSub ? 118 : 98)} className="sub orq-own">{ownLine}</Label>}
-        <div className="split" style={{ left: pctX(N.orq.x), top: pctY(N.orq.y + 98 + (orqSub ? 22 : 0) + (ownLine ? 20 : 0)) }}>
+        <div className="split" style={{ left: pctX(N.orq.x), top: pctY(N.orq.y + 98 + (orqSub ? 22 : 0)) }}>
           <div className="gauge" title={share ? "Reparto del gasto real en dólares (precios API), orquestador incluido" : "Sin datos de uso todavía"}>
             <div className="gauge-head"><span className="gauge-cap">gasto</span><b>{spend != null ? fmtCost(spend) : spendNote ? "…" : "—"}</b></div>
             <Bar share={share} />
@@ -305,13 +288,15 @@ export default function Scene({ run, phase, now, packets }) {
           {directLine && <div className="gauge-note gauge-direct">{directLine}</div>}
         </div>
 
-        <Label x={N.asistente.x} y={98} className="title">Asistente</Label>
-        <Label x={N.asistente.x} y={122}><Pill dot={A.pill.dot}>{A.pill.text}</Pill></Label>
-        <Label x={N.asistente.x} y={146} className="sub">{A.sub}</Label>
-
-        <Label x={N.programador.x} y={478} className="title">Programador</Label>
-        <Label x={N.programador.x} y={502}><Pill dot={P.pill.dot}>{P.pill.text}</Pill></Label>
-        <Label x={N.programador.x} y={526} className="sub">{P.sub}</Label>
+        {WORKERS.map((w) => {
+          const t = texts[w.id];
+          const at = (dy, className, children) => <Label key={`${w.id}${dy}`} x={w.x + SIDE.dx} y={w.y + dy} className={`side ${className}`}>{children}</Label>;
+          return [
+            at(SIDE.title, "title", <span title={t.tip ?? undefined}>{w.title}</span>),
+            at(SIDE.pill, "", <span title={t.tip ?? undefined}><Pill dot={t.pill.dot}>{t.pill.text}</Pill></span>),
+            at(SIDE.sub, "sub", <span title={t.tip ?? undefined}>{t.sub}</span>)
+          ];
+        })}
       </div>
     </div>
     </div>

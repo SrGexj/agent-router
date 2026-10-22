@@ -11,20 +11,15 @@ const LABEL_MS = 2200;
 export function packetsFor(ev, run, born, nextSeq) {
   const mk = (edge, dir, kind, label, dur) => ({ id: `${born}-${nextSeq()}`, edge, dir, kind, label, born, dur });
   const nodeOf = (taskId) => run?.tasks?.[taskId]?.node ?? "programador";
-  // Los subagentes propios del orquestador no tienen arista: no mueven paquetes.
-  const own = (taskId) => nodeOf(taskId) === "propio";
 
   switch (ev.type) {
     case "run_start":
       return [mk("in", 1, "label", truncate(ev.task, 22), LABEL_MS)];
     case "task_start":
-      if (own(ev.taskId)) return [];
       return [mk(nodeOf(ev.taskId), 1, "label", truncate(ev.description, 24), LABEL_MS)];
     case "tool":
-      if (ev.taskId && own(ev.taskId)) return [];
       return ev.taskId ? [mk(nodeOf(ev.taskId), 1, "dot", null, DOT_MS)] : [mk("in", 1, "dot", null, DOT_MS)];
     case "task_end":
-      if (own(ev.taskId)) return [];
       return ev.status === "completed"
         ? [mk(nodeOf(ev.taskId), -1, "ok", "OK", LABEL_MS)]
         : [mk(nodeOf(ev.taskId), -1, "error", "fallo", LABEL_MS)];

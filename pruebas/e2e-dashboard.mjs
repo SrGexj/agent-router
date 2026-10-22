@@ -5,6 +5,7 @@
 //   npm run e2e              (o: node pruebas/e2e-dashboard.mjs)
 //   E2E_SHOT=/ruta/detalle.png npm run e2e   (además guarda una captura del panel Detalle)
 //   E2E_SHOT_SCENE=/ruta/terminada.png npm run e2e   (captura de la escena de una ejecución terminada)
+//   E2E_SHOT_CUATRO=/ruta/cuatro.png npm run e2e   (escena con los cuatro nodos a 1280 y 390 px; guarda cuatro-1280.png y cuatro-390.png)
 //   E2E_SHOT_LAYA=/ruta/escena-laya.png E2E_SHOT_LAYA_390=/ruta/escena-laya-390.png npm run e2e   (escena en curso con el nodo Laya, a 1280 y a 390 px)
 //   E2E_SHOT_PERFILES=/ruta/perfiles.png npm run e2e   (captura del panel Cuota con ahorro y sombra por cuenta, a 390 px)
 //   E2E_SHOT_SHADOW=/ruta/sombra.png npm run e2e   (captura de la página con el modo sombra)
@@ -95,7 +96,7 @@ try {
 
   // 1. Sin ejecuciones: en espera, con la red completa y quieta.
   await waitText("Aún no hay ejecuciones");
-  for (const t of ["Tú", "Orquestador", "Asistente", "Programador", "Recibe", "Entrega", "En espera", "Aún no hay ejecuciones"]) await waitText(t);
+  for (const t of ["Tú", "Orquestador", "Asistente", "Programador", "Consultor", "Otros", "Recibe", "Entrega", "En espera", "Aún no hay ejecuciones"]) await waitText(t);
   console.log("✓ en espera");
 
   // 2. Una ejecución real del router (con claude falso) aparece en vivo.
@@ -446,6 +447,43 @@ try {
     }
     if (process.env.E2E_SHOT_SCENE) await (await page.$(".card")).screenshot({ path: process.env.E2E_SHOT_SCENE });
     console.log("✓ resumen final en la escena: nodos y caption");
+  }
+
+  // 7d1. Cuatro trabajadores: consultor (Opus) y el nodo "Otros" (Explore, Plan...) con su contador y los tipos en el tooltip.
+  {
+    const t = Date.now() - 300_000;
+    const ev = [
+      { type: "run_start", runId: "cuatro-1", task: "Escena con cuatro nodos", mode: "sesion", model: "opus", cwd: "/tmp/p", t },
+      { type: "task_start", taskId: "k", agent: "consultor", description: "Valorar el diseño", prompt: "", t: t + 1000 },
+      { type: "task_model", taskId: "k", model: "claude-opus-5-5", t: t + 1100 },
+      { type: "task_end", taskId: "k", status: "completed", summary: "", t: t + 2000 },
+      { type: "task_start", taskId: "x1", agent: "Explore", description: "Buscar", prompt: "", t: t + 2100 },
+      { type: "task_start", taskId: "x2", agent: "Plan", description: "Planificar", prompt: "", t: t + 2200 },
+      { type: "task_end", taskId: "x1", status: "completed", summary: "", t: t + 3000 },
+      { type: "task_end", taskId: "x2", status: "completed", summary: "", t: t + 3100 },
+      { type: "run_end", status: "done", exitCode: 0, t: t + 4000 }
+    ];
+    await writeFile(join(home, "runs", "cuatro-1.jsonl"), ev.map((e) => JSON.stringify(e)).join("\n") + "\n");
+    await waitText("Escena con cuatro nodos");
+    await page.setViewport({ width: 1280, height: 1100 });
+    await page.waitForFunction(() => {
+      if (document.querySelector(".runs button.sel .rtask")?.textContent === "Escena con cuatro nodos") return true;
+      [...document.querySelectorAll(".runs .rtask")].find((e) => e.textContent === "Escena con cuatro nodos")?.closest("button").click();
+      return false;
+    }, { timeout: 10_000, polling: 250 }).catch(() => fail("No se selecciona cuatro-1"));
+    await page.waitForFunction(() => document.querySelector(".scene")?.innerText.includes("OK 2/2"), { timeout: 10_000 }).catch(async () => fail(`Falta el contador "OK 2/2" del nodo Otros:\n${await page.$eval(".scene", (e) => e.innerText)}`));
+    const sc = await page.$eval(".scene", (el) => el.innerText);
+    for (const x of ["Consultor", "Opus 5.5 · 1 encargo", "Otros", "OK 1/1"]) if (!sc.includes(x)) fail(`Falta "${x}" en la escena de cuatro nodos:\n${sc}`);
+    const tip = await page.$$eval(".scene .lbl.side span[title]", (els) => els.map((e) => e.title).find((x) => x.includes("Explore")) ?? "");
+    if (!tip.includes("Explore") || !tip.includes("Plan")) fail(`El tooltip de Otros no lista los tipos: "${tip}"`);
+    for (const w of [1280, 390]) {
+      await page.setViewport({ width: w, height: 1100 });
+      const wide = await page.evaluate(() => [...document.querySelectorAll(".scene *")].filter((e) => e.closest(".scene-scroll") && !e.closest("svg") && e.getBoundingClientRect().right > e.closest(".scene").getBoundingClientRect().right + 2).length);
+      if (wide > 0) fail(`${wide} etiquetas de la escena se salen de su caja a ${w} px`);
+      if (process.env.E2E_SHOT_CUATRO) await (await page.$(".card")).screenshot({ path: process.env.E2E_SHOT_CUATRO.replace(/\.png$/, `-${w}.png`) });
+    }
+    await page.setViewport({ width: 1280, height: 1100 });
+    console.log("✓ escena con cuatro nodos: consultor, Otros con contador y tipos");
   }
 
   // 7d2. Gasto del orquestador en vivo y nodo Laya: en curso sin uso, con instantánea intermedia y ya terminada.

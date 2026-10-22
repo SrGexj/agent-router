@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { reduceEvents, reduceRun } from "../src/core/reducer.mjs";
 import { derivePhase, PHASES } from "../src/core/view.mjs";
 import { packetsFor, truncate } from "../dashboard/src/packets.js";
-import { captionFor, fmtDuration, summaryLine, orchestratorSub, workerSub, layaNode, spendPending, spendLabels, ownSubagentsLine, orchestratorName } from "../dashboard/src/captions.js";
+import { captionFor, fmtDuration, summaryLine, orchestratorSub, workerSub, layaNode, spendPending, spendLabels, ownTypes, orchestratorName } from "../dashboard/src/captions.js";
 import { spendShare } from "../src/core/details.mjs";
 import { DEMO_EVENTS, DEMO_LENGTH, demoRunAt, phaseSpans } from "../dashboard/src/demo.js";
 import { iso, boxFaces, bezierPoint, shadowLink, LAYA } from "../dashboard/src/scene/geometry.js";
@@ -231,26 +231,34 @@ describe("resumen final de una ejecución", () => {
     ];
     const run = reduceEvents(evs);
     expect(workerSub(run, "programador", "Sonnet")).toBe("Sonnet 5.5 · 1 encargo");
-    expect(ownSubagentsLine(run)).toBe("+1 Explore en curso");
-    const sin = reduceEvents(evs.slice(0, 3));
-    expect(ownSubagentsLine(sin)).toBeNull();
-    expect(ownSubagentsLine(null)).toBeNull();
+    expect(ownTypes(run)).toBe("Explore");
+    expect(workerSub(run, "propio", "Opus")).toBe("Opus 5.5 · 1 encargo");
+    expect(ownTypes(reduceEvents(evs.slice(0, 3)))).toBeNull();
+    expect(ownTypes(null)).toBeNull();
   });
 
-  it("ownSubagentsLine: varios tipos y subagentes terminados", () => {
+  it("ownTypes: tipos distintos con su número, por orden de aparición", () => {
     const e = (id, agent) => ({ type: "task_start", taskId: id, agent, description: "", prompt: "", t: 1 });
     const run = reduceEvents([start, e("a", "Explore"), e("b", "Plan"), e("c", "Explore")]);
-    expect(ownSubagentsLine(run)).toBe("+3 subagentes en curso");
-    const done = reduceRun(reduceRun(run, { type: "task_end", taskId: "a", status: "completed", t: 2 }), { type: "task_end", taskId: "b", status: "completed", t: 2 });
-    expect(ownSubagentsLine(done)).toBe("+1 Explore en curso");
-    expect(ownSubagentsLine(reduceRun(done, { type: "task_end", taskId: "c", status: "completed", t: 3 }))).toBe("subagentes: 3");
+    expect(ownTypes(run)).toBe("Explore ×2, Plan");
   });
 
-  it("los subagentes propios no mueven paquetes por aristas de roles", () => {
-    const ts = { type: "task_start", taskId: "e", agent: "Explore", description: "Busca", prompt: "", t: 1 };
-    const run = reduceEvents([start, ts]);
-    expect(packetsFor(ts, run, 1, () => 1)).toEqual([]);
-    expect(packetsFor({ type: "tool", taskId: "e", name: "Grep", t: 2 }, run, 1, () => 1)).toEqual([]);
+  it("workerSub del consultor: modelo, encargos y coste por su rol", () => {
+    const run = reduceEvents([start,
+      { type: "task_start", taskId: "c", agent: "consultor", description: "", prompt: "", t: 1 },
+      { type: "task_model", taskId: "c", model: "claude-opus-5-5", t: 2 },
+      { type: "task_usage", taskId: "c", snapshot: true, byModel: { "claude-opus-5-5": { input: 1_000_000, output: 0, cacheRead: 0, cacheWrite5m: 0, cacheWrite1h: 0 } }, t: 3 }]);
+    expect(workerSub(run, "consultor", "Opus")).toMatch(/^Opus 5\.5 · 1 encargo · \d+,\d\d \$ · 1 M tok$/);
+    expect(workerSub(reduceEvents([start]), "consultor", "Opus")).toBe("Opus · sin encargos");
+  });
+
+  it("los encargos del consultor y de otros viajan por su arista", () => {
+    for (const [agent, node] of [["consultor", "consultor"], ["Explore", "propio"]]) {
+      const ts = { type: "task_start", taskId: "e", agent, description: "Busca", prompt: "", t: 1 };
+      const run = reduceEvents([start, ts]);
+      expect(packetsFor(ts, run, 1, () => 1)[0]).toMatchObject({ edge: node, dir: 1, kind: "label" });
+      expect(packetsFor({ type: "tool", taskId: "e", name: "Grep", t: 2 }, run, 1, () => 1)[0]).toMatchObject({ edge: node, kind: "dot" });
+    }
   });
 
   it("workerSub: encargos, coste y tokens por trabajador; también en curso", () => {
@@ -381,6 +389,8 @@ describe("nombre del orquestador sin Opus fijo", () => {
     expect(captionFor("analiza", run, 5).title).toBe("Sonnet analiza");
     expect(captionFor("revisa", run, 5).text).toMatch(/^Sonnet comprueba/);
     expect(captionFor("delega", run, 5).text).toMatch(/subagente propio de Sonnet/);
+    const c = reduceEvents([start, { type: "task_start", taskId: "k", agent: "consultor", description: "", prompt: "", t: 1 }]);
+    expect(captionFor("delega", c, 5).text).toBe("1 encargo: 1 a Consultor (Opus).");
     const waiting = { ...run, waiting: { kind: "question", text: "", questions: [], t: 1 } };
     expect(captionFor("analiza", waiting, 5).text).toMatch(/^Sonnet necesita/);
   });

@@ -155,7 +155,7 @@ describe("cli cuota", () => {
     expect(isCuotaCommand("cuota")).toBe(true);
     expect(isCuotaCommand("laya-datos")).toBe(false);
     expect(parseCuotaArgs(["cuota"])).toMatchObject({ days: null, profile: "todos", verbose: false, approx: false });
-    expect(parseCuotaArgs(["cuota", "--dias", "3", "--perfil", "personal", "--detalle"])).toMatchObject({ days: 3, profile: "personal", verbose: true, approx: true });
+    expect(parseCuotaArgs(["cuota", "--dias", "3", "--perfil", "personal", "--detalle", "--aprox"])).toMatchObject({ days: 3, profile: "personal", verbose: true, approx: true });
     expect(() => parseCuotaArgs(["cuota", "--dias", "x"])).toThrow();
     expect(() => parseCuotaArgs(["cuota", "--foo"])).toThrow();
   });

@@ -187,9 +187,14 @@ describe("instalador", () => {
 
   it("deja escribir a los subagentes en sus worktrees sin preguntar (solo en sesiones co)", () => {
     const allow = buildCoSettings(paths).permissions.allow;
-    expect(allow).toEqual(["Edit(**/.claude/worktrees/**)"]);
+    expect(allow).toContain("Edit(**/.claude/worktrees/**)");
     expect(allow.some((r) => r.startsWith("Write("))).toBe(false);
-    expect(allow.every((r) => r.includes(".claude/worktrees/"))).toBe(true);
+  });
+
+  it("permite borrar ramas ya mergeadas (git branch -d) sin preguntar, pero no -D", () => {
+    const allow = buildCoSettings(paths).permissions.allow;
+    expect(allow).toContain("Bash(git branch -d *)");
+    expect(allow.some((r) => r.includes("-D"))).toBe(false);
   });
 
   it("planStatuslineChain: respeta un statusline-next existente y informa de la encadenada", () => {

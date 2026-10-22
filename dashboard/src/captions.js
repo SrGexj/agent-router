@@ -47,11 +47,14 @@ const familyName = (model) => {
   return m ? `${m[1][0].toUpperCase()}${m[1].slice(1).toLowerCase()}` : null;
 };
 
-// Bajo el orquestador: solo el modelo ("Opus"); coste y tokens van en la tarjeta de gasto/uso. null sin datos de uso suyos.
+// Nombre del orquestador en textos: el modelo realmente elegido (co --model sonnet), nunca un "Opus" fijo.
+export const orchestratorName = (run) => familyName(run?.mainModel) ?? (run ? familyName(costBreakdown(run).orchestrator.models[0]) : null) ?? "Orquestador";
+
+// Bajo el orquestador: solo el modelo ("Sonnet", "Opus"...); coste y tokens van en la tarjeta de gasto/uso. null sin datos de uso suyos.
 export function orchestratorSub(run) {
   const o = costBreakdown(run).orchestrator;
   if (o.tokens <= 0) return familyName(run?.mainModel); // sin uso aún: el modelo real que anotó el hook (co --model sonnet)
-  return familyName(o.models[0]) ?? "Opus";
+  return familyName(run?.mainModel) ?? familyName(o.models[0]) ?? "Orquestador";
 }
 
 // Bajo el orquestador: sus subagentes propios (Explore, general-purpose, Plan...), que no van a los nodos de rol.
@@ -122,16 +125,16 @@ export function captionFor(phase, run, now) {
 
   if (run?.status === "running" && run.waiting && !["fallo", "limitado", "entrega"].includes(phase)) {
     const what = { question: "una pregunta", permission: "un permiso", plan: "la aprobación de un plan" }[run.waiting.kind] ?? "tu respuesta";
-    return { title: "Esperando tu respuesta", text: `Opus necesita ${what}: respóndela en la terminal.`, tone: "normal" };
+    return { title: "Esperando tu respuesta", text: `${orchestratorName(run)} necesita ${what}: respóndela en la terminal.`, tone: "normal" };
   }
 
   switch (phase) {
     case "reposo":
-      return { title: "En espera", text: "Abre una sesión con co (o lanza router \"…\") y Opus repartirá el trabajo entre el equipo.", tone: "normal" };
+      return { title: "En espera", text: "Abre una sesión con co (o lanza router \"…\") y el orquestador repartirá el trabajo entre el equipo.", tone: "normal" };
     case "recibe":
       return { title: "Tarea recibida", text: run.task, tone: "normal" };
     case "analiza":
-      return { title: "Opus analiza", text: "Lee el contexto y decide qué hace él y qué delega.", tone: "normal" };
+      return { title: `${orchestratorName(run)} analiza`, text: "Lee el contexto y decide qué hace él y qué delega.", tone: "normal" };
     case "delega": {
       const p = tasks.filter((t) => t.node === "programador").length;
       const a = tasks.filter((t) => t.node === "asistente").length;
@@ -139,7 +142,7 @@ export function captionFor(phase, run, now) {
       const parts = [];
       if (p) parts.push(`${p} a Programador (Sonnet)`);
       if (a) parts.push(`${a} a Asistente (Haiku)`);
-      if (o) parts.push(`${o} ${o === 1 ? "subagente propio" : "subagentes propios"} de Opus`);
+      if (o) parts.push(`${o} ${o === 1 ? "subagente propio" : "subagentes propios"} de ${orchestratorName(run)}`);
       return { title: "Reparto", text: `${plural(tasks.length, "encargo", "encargos")}: ${parts.join(" y ")}.`, tone: "normal" };
     }
     case "ejecuta":
@@ -152,8 +155,8 @@ export function captionFor(phase, run, now) {
       return {
         title: "Revisión",
         text: failed.length
-          ? `Opus revisa los resultados; ${plural(failed.length, "encargo falló", "encargos fallaron")} y decide si reintentar.`
-          : "Opus comprueba los resultados antes de darlos por buenos.",
+          ? `${orchestratorName(run)} revisa los resultados; ${plural(failed.length, "encargo falló", "encargos fallaron")} y decide si reintentar.`
+          : `${orchestratorName(run)} comprueba los resultados antes de darlos por buenos.`,
         tone: "normal"
       };
     case "entrega":

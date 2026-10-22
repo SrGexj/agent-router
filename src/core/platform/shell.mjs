@@ -8,7 +8,7 @@ export const dq = (s) => String(s).replace(/[\\"$`]/g, "\\$&");
 // openLine: la orden que abre el dashboard (la aporta cada plataforma). profile2: { dir, alias, args }.
 export function coFunction({ node, appRoot, home, port = 4317, personalDir = null, alias = "cop", personalArgs = [], openLine = null }) {
   const open = openLine ?? `open "http://127.0.0.1:${port}"`;
-  const co = `# Claude Code en modo orquestador: Opus reparte entre asistente (Haiku) y programador (Sonnet).
+  const co = `# Claude Code en modo orquestador: el orquestador reparte entre asistente (Haiku) y programador (Sonnet).
 # La primera sesión co abre el dashboard; las siguientes no repiten pestaña.
 co() {
   pgrep -qf "agent-router/co-settings.json" || ${open}

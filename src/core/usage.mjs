@@ -66,6 +66,16 @@ export function advanceUsage(state, text, { sidechain = false } = {}) {
   return { state: next, usage: { byModel: totalOf(withTail) } };
 }
 
+// Modelo del último mensaje assistant del transcript principal (sin subagentes ni sintéticos); null si no hay.
+export function lastModelOf(text) {
+  let model = null;
+  for (const line of (text ?? "").split("\n")) {
+    const hit = usageEntry(line, false);
+    if (hit) model = hit.model;
+  }
+  return model;
+}
+
 // Ruta del transcript de un subagente: la que traiga el hook (SubagentStop) o la derivada del transcript
 // principal (<proyecto>/<sesión>.jsonl → <proyecto>/<sesión>/subagents/agent-<id>.jsonl), que es la que
 // usan también los hooks de PreToolUse/PostToolUse del subagente, que no traen agent_transcript_path.

@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { reduceEvents, reduceRun } from "../src/core/reducer.mjs";
 import { derivePhase, PHASES } from "../src/core/view.mjs";
 import { packetsFor, truncate } from "../dashboard/src/packets.js";
-import { captionFor, fmtDuration, summaryLine, orchestratorSub, workerSub, layaNode, spendPending, spendLabels, ownSubagentsLine } from "../dashboard/src/captions.js";
+import { captionFor, fmtDuration, summaryLine, orchestratorSub, workerSub, layaNode, spendPending, spendLabels, ownSubagentsLine, orchestratorName } from "../dashboard/src/captions.js";
 import { spendShare } from "../src/core/details.mjs";
 import { DEMO_EVENTS, DEMO_LENGTH, demoRunAt, phaseSpans } from "../dashboard/src/demo.js";
 import { iso, boxFaces, bezierPoint, shadowLink, LAYA } from "../dashboard/src/scene/geometry.js";
@@ -211,6 +211,16 @@ describe("resumen final de una ejecución", () => {
     expect(orchestratorSub(null)).toBeNull();
   });
 
+  it("orchestratorSub: sin uso cae al modelo anotado por main_model (co --model sonnet)", () => {
+    const run = reduceEvents([start, { type: "main_model", model: "claude-sonnet-5-5", t: 1 }]);
+    expect(orchestratorSub(run)).toBe("Sonnet");
+  });
+
+  it("workerSub: encargo sin modelo usa el modelo de reserva del rol", () => {
+    const run = reduceEvents([start, { type: "task_start", taskId: "a", agent: "asistente", description: "", prompt: "", t: 1 }]);
+    expect(workerSub(run, "asistente", "Haiku")).toBe("Haiku · 1 encargo");
+  });
+
   it("Explore en Opus: el Programador no lo cuenta ni toma su modelo; el orquestador lo muestra aparte", () => {
     const evs = [
       start,
@@ -347,5 +357,46 @@ describe("geometría del nodo Laya", () => {
     expect(LAYA.title).toBeLessThan(LAYA.pill);
     expect(LAYA.pill).toBeLessThan(LAYA.verdict);
     expect(LAYA.verdict).toBeLessThan(LAYA.linkFrom);
+  });
+});
+
+describe("nombre del orquestador sin Opus fijo", () => {
+  const sonnet = () => reduceEvents([start, { type: "main_model", model: "claude-sonnet-5-5", t: 1 }]);
+  const tasks = [
+    { type: "task_start", taskId: "a", agent: "Explore", description: "", prompt: "", t: 2 }
+  ];
+
+  it("orchestratorName: modelo real, o Orquestador si no se conoce", () => {
+    expect(orchestratorName(sonnet())).toBe("Sonnet");
+    expect(orchestratorName(reduceEvents([start]))).toBe("Orquestador");
+    expect(orchestratorName(null)).toBe("Orquestador");
+  });
+
+  it("captionFor no dice Opus con co --model sonnet", () => {
+    const run = reduceEvents([start, { type: "main_model", model: "claude-sonnet-5-5", t: 1 }, ...tasks]);
+    for (const phase of ["analiza", "delega", "revisa"]) {
+      const c = captionFor(phase, run, 5);
+      expect(`${c.title} ${c.text}`).not.toMatch(/Opus/);
+    }
+    expect(captionFor("analiza", run, 5).title).toBe("Sonnet analiza");
+    expect(captionFor("revisa", run, 5).text).toMatch(/^Sonnet comprueba/);
+    expect(captionFor("delega", run, 5).text).toMatch(/subagente propio de Sonnet/);
+    const waiting = { ...run, waiting: { kind: "question", text: "", questions: [], t: 1 } };
+    expect(captionFor("analiza", waiting, 5).text).toMatch(/^Sonnet necesita/);
+  });
+
+  it("captionFor sin modelo conocido usa Orquestador", () => {
+    expect(captionFor("analiza", reduceEvents([start]), 5).title).toBe("Orquestador analiza");
+    expect(captionFor("reposo", null, 0).text).toMatch(/y el orquestador repartirá/);
+  });
+
+  it("orchestratorName sin main_model usa el modelo del uso registrado", () => {
+    const u = { input: 10, output: 5, cacheRead: 0, cacheWrite5m: 0, cacheWrite1h: 0 };
+    const run = reduceEvents([start, { type: "orchestrator_usage", byModel: { "claude-sonnet-5-5": u }, t: 1 }]);
+    expect(orchestratorName(run)).toBe("Sonnet");
+  });
+
+  it("orchestratorSub con uso sin modelo reconocible no inventa Opus", () => {
+    expect(orchestratorSub(sonnet())).toBe("Sonnet");
   });
 });

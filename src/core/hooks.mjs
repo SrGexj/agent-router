@@ -123,13 +123,15 @@ export function translateHook(p, session, now, makeRunId, ctx = {}) {
     const before = open ? { runId: open, events: cancelEvents(t, ctx.orchestratorUsage) } : undefined;
     const seq = session.seq + 1;
     const runId = makeRunId(now, String(p.session_id ?? "sesion").slice(0, 8), seq);
-    const next = { runId, lastRunId: runId, seq };
+    const next = { runId, lastRunId: runId, seq, ...(ctx.mainModel && { mainModel: ctx.mainModel }) };
     if (ctx.transcriptSize != null) next.transcriptOffset = ctx.transcriptSize;
     const res = {
       runId,
       session: next,
       events: [{ type: "run_start", runId, task: p.prompt ?? "", mode: "sesion", model: "opus", cwd: p.cwd ?? null, profile: ctx.profile ?? "trabajo", ...(ctx.directEdits > 0 && { directEdits: ctx.directEdits }), t }]
     };
+    // Etiqueta del orquestador desde el primer mensaje, sin esperar al primer hook en vivo.
+    if (ctx.mainModel) res.events.push({ type: "main_model", model: ctx.mainModel, t });
     if (before) res.before = before;
     // Solo al abrir ejecución: el proceso del hook lanza el clasificador en modo sombra con este prompt ya saneado.
     const shadowPrompt = sanitizePrompt(p.prompt).trim();
@@ -139,9 +141,10 @@ export function translateHook(p, session, now, makeRunId, ctx = {}) {
   if (!open) return none;
 
   // Al cerrar, el coste del orquestador va antes del run_end.
+  const mainModelEvents = () => (ctx.mainModel && ctx.mainModel !== session.mainModel ? [{ type: "main_model", model: ctx.mainModel, t }] : []);
   const close = (events) => {
     const end = events.findIndex((e) => e.type === "run_end");
-    const all = [...events.slice(0, end), ...(ctx.contextEvents ?? []), ...usageEvents("orchestrator_usage", ctx.orchestratorUsage, t), ...events.slice(end)];
+    const all = [...events.slice(0, end), ...mainModelEvents(), ...(ctx.contextEvents ?? []), ...usageEvents("orchestrator_usage", ctx.orchestratorUsage, t), ...events.slice(end)];
     return { runId: open, session: { runId: null, lastRunId: open, seq: session.seq }, events: all };
   };
   // Con el estrangulado cumplido y datos leídos, la instantánea acumulada va al final y se recuerda cuándo y hasta dónde se leyó.
@@ -151,6 +154,10 @@ export function translateHook(p, session, now, makeRunId, ctx = {}) {
   const keep = (events, patch = null) => {
     let out = events;
     let next = patch ? { ...session, ...patch } : session;
+    if (live || liveContext) {
+      const mm = mainModelEvents();
+      if (mm.length) { out = [...out, ...mm]; next = { ...next, mainModel: ctx.mainModel }; }
+    }
     if (live) {
       out = [...out, ...usageEvents("orchestrator_usage", ctx.orchestratorUsage, t)];
       next = { ...next, lastUsageAt: t, ...(ctx.usageState ? { usageState: ctx.usageState } : {}) };

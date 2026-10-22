@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { fmtClock, fmtCost, fmtCostFine, fmtDuration, fmtTokens, fmtModel, fmtTokenTypes } from "./captions.js";
+import { fmtClock, fmtCost, fmtCostFine, fmtDuration, fmtTokens, fmtModel, fmtTokenTypes, orchestratorName } from "./captions.js";
 import { truncate } from "./packets.js";
 import WindowLine from "./WindowLine.jsx";
 import { useProfileLabel } from "./profiles.js";
@@ -28,7 +28,7 @@ function SavingsBlock({ savings }) {
 const ROUTE_NAME = { asistente: "Asistente", programador: "Programador", opus: "Opus" };
 const ROUTES = ["asistente", "programador", "opus"];
 
-// Aciertos del clasificador frente a lo que hizo Opus: una línea y el resto plegado. Oculto sin ejecuciones comparables.
+// Aciertos del clasificador frente a lo que hizo el orquestador: una línea y el resto plegado. Oculto sin ejecuciones comparables.
 function ShadowBlock({ shadow }) {
   const l = shadowLines(shadow);
   if (!l) return null;
@@ -207,7 +207,7 @@ export function HistoryPanel({ runs, selectedId, onSelect, now }) {
 const TASK_DOT = { running: "ok pulse", completed: "ok", failed: "err", killed: "err" };
 const TASK_TEXT = { running: "en curso", completed: "completado", failed: "falló", killed: "falló" };
 const ROLES = [
-  ["orchestrator", "Orquestador (Opus)"],
+  ["orchestrator", "Orquestador"],
   ["programador", "Programador (Sonnet)"],
   ["asistente", "Asistente (Haiku)"],
   ["propio", "Subagentes propios (Explore…)"]
@@ -308,7 +308,7 @@ function Shadow({ run }) {
           <div className="dshadow">
             <p className="sline">
               {name} eligió: <b>{ROUTE_NAME[v.choice] ?? v.choice}</b>{v.confidence != null ? ` (${Math.round(v.confidence * 100)} %)` : ""}
-              {v.actual ? <> · Opus hizo: <b>{ROUTE_NAME[v.actual]}</b>{v.targetSource === "usuario" && v.target !== v.actual ? <> · tu etiqueta: <b>{ROUTE_NAME[v.target]}</b></> : null} → <span className={`stag ${v.match ? "ok" : "warn"}`}>{v.match ? "coincide" : "no coincide"}</span></> : <> · Opus aún no ha terminado</>}
+              {v.actual ? <> · {orchestratorName(run)} hizo: <b>{ROUTE_NAME[v.actual]}</b>{v.targetSource === "usuario" && v.target !== v.actual ? <> · tu etiqueta: <b>{ROUTE_NAME[v.target]}</b></> : null} → <span className={`stag ${v.match ? "ok" : "warn"}`}>{v.match ? "coincide" : "no coincide"}</span></> : <> · {orchestratorName(run)} aún no ha terminado</>}
             </p>
             {v.reason && <p className="sreason">{v.reason}</p>}
             <p className="sreason">
@@ -327,14 +327,14 @@ function Shadow({ run }) {
   );
 }
 
-function Spend({ b }) {
+function Spend({ b, run }) {
   const roles = ROLES.filter(([k]) => k !== "propio" || b[k].tokens > 0);
   const max = Math.max(...roles.map(([k]) => b[k].costUsd), 0.000001);
   return (
     <div className="dspend">
       {roles.map(([k, name]) => (
         <div key={k} className="srow" title={fmtTokenTypes(b[k].tokenTypes)}>
-          <span className="sname">{name}</span>
+          <span className="sname">{k === "orchestrator" && orchestratorName(run) !== "Orquestador" ? `Orquestador (${orchestratorName(run)})` : name}</span>
           <span className="sbar"><span style={{ transform: `scaleX(${b[k].costUsd / max})` }} /></span>
           <b>{fmtCost(b[k].costUsd)}</b>
           <span className="stok">{fmtTokens(b[k].tokens)} tok</span>
@@ -408,7 +408,7 @@ const TASK_AGENT_OPTS = [["all", "Todos"], ["asistente", "Asistente"], ["program
 const NO_TASK_FILTER = { text: "", status: "all", agent: "all" };
 
 // Con key={run.id} desde el padre: al cambiar de ejecución los filtros se reinician.
-function Tasks({ rows }) {
+function Tasks({ rows, run }) {
   const [f, setF] = useState(NO_TASK_FILTER);
   const set = (patch) => setF((cur) => ({ ...cur, ...patch }));
   const done = rows.filter((r) => r.status === "completed").length;
@@ -417,7 +417,7 @@ function Tasks({ rows }) {
   return (
     <div className="dblock">
       <h4>Encargos <span className="count">{done} de {rows.length} completados{filtering ? ` · mostrando ${shown.length}` : ""}</span></h4>
-      {rows.length === 0 ? <p className="note">Opus no ha delegado nada todavía.</p> : (
+      {rows.length === 0 ? <p className="note">{orchestratorName(run)} no ha delegado nada todavía.</p> : (
         <>
           <div className="filters">
             <SearchBox value={f.text} onChange={(text) => set({ text })} label="Buscar encargos" placeholder="Buscar en descripción, encargo y resultado" />
@@ -506,14 +506,14 @@ export function DetailPanel({ run, now }) {
 
       <div className="dblock">
         <h4>Gasto</h4>
-        {b.hasData ? <Spend b={b} /> : <p className="note">Esta ejecución no tiene datos de uso.</p>}
+        {b.hasData ? <Spend b={b} run={run} /> : <p className="note">Esta ejecución no tiene datos de uso.</p>}
       </div>
 
       <Context run={run} b={b} now={now} />
 
       <Shadow run={run} />
 
-      <Tasks key={run.id} rows={rows} />
+      <Tasks key={run.id} rows={rows} run={run} />
     </section>
   );
 }

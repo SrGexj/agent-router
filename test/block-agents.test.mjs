@@ -22,6 +22,7 @@ describe("decideBlock", () => {
     const r = decideBlock(pre({ subagent_type: "Explore" }), BLOCKED).reason;
     expect(r).toContain('"asistente" (Haiku: docs, web, navegador, comprobaciones)');
     expect(r).toContain('"programador" (Sonnet: código)');
+    expect(r).toContain('"consultor" (Opus, solo lectura: decisiones de diseño o riesgo)');
   });
   it("también con la herramienta Task", () => {
     expect(decideBlock(pre({ subagent_type: "fork" }, "Task"), BLOCKED)).not.toBeNull();

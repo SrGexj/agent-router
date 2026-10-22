@@ -39,7 +39,7 @@ El instalador:
 - Crea la copia estable `~/.agent-router/app` (ver "Copia estable") y deja ahí el dashboard construido.
 - Escribe los hooks y la statusline de `co` en `~/.agent-router/co-settings.json`.
 - Mantiene tu statusline: su comando se guarda en `~/.agent-router/statusline-next` y se sigue mostrando en `co`.
-- Enlaza `asistente.md` y `programador.md` en `~/.claude/agents`. No pisa los que ya existan.
+- Enlaza `asistente.md`, `programador.md` y `consultor.md` en `~/.claude/agents`. No pisa los que ya existan.
 - Enlaza `~/bin/router` (debe estar en tu PATH).
 - Añade la función `co` al rc del shell (`~/.zshrc` en macOS; `~/.zshrc` o `~/.bashrc` en Linux). Antes guarda una copia en `~/.agent-router/`.
 - Instala el dashboard como servicio (`com.agent-router.server`) en http://127.0.0.1:4317, siempre activo.
@@ -100,7 +100,7 @@ co                    # en cualquier proyecto
 
 Cada mensaje tuyo es una ejecución en el dashboard, desde el mensaje hasta `Stop`. Las sesiones normales de `claude` no cambian: los hooks y la statusline van solo por `--settings` en `co`.
 
-En un proyecto con su propio `.claude/agents/asistente.md` o `programador.md`, Claude Code usa esos en lugar de los genéricos.
+En un proyecto con su propio `.claude/agents/asistente.md`, `programador.md` o `consultor.md`, Claude Code usa esos en lugar de los genéricos.
 
 **Segundo perfil (opcional).** Si defines `ROUTER_PROFILE2_DIR` con la carpeta de config de otra cuenta antes de ejecutar `npm run instalar` (si la carpeta existe), el instalador añade el alias `cop` (o el que indiques en `ROUTER_PROFILE2_ALIAS`). `cop` ejecuta `co` con `CLAUDE_CONFIG_DIR` apuntando a esa carpeta y con los argumentos de `ROUTER_PROFILE2_ARGS`.
 
@@ -179,6 +179,7 @@ El prompt del orquestador (`src/core/prompt.mjs`) le pide:
 1. Leer lo justo para entender la tarea.
 2. Dividirla en encargos autocontenidos, con un criterio de aceptación comprobable.
 3. Hacer él solo lo que exige criterio: arquitectura, autenticación, cifrado, migraciones y borrados.
+   Para decisiones de diseño o de riesgo que no quiera resolver en su contexto, puede pedir una recomendación corta al `consultor` (Opus, solo lectura).
 4. Lanzar en paralelo lo independiente. Usa `isolation: "worktree"` solo si hay repositorio git y dos programadores van a tocar los mismos archivos.
 5. Revisar cada resultado y reintentar o asumir lo que falle.
 

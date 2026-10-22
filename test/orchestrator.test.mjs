@@ -52,6 +52,15 @@ describe("buildOrchestratorPrompt", () => {
     expect(p).not.toMatch(/tú \(Opus\)/);
   });
 
+  it("la regla del consultor: decisiones de diseño o riesgo y revisión delicada, sin recargar el prompt", () => {
+    const p = buildOrchestratorPrompt({ agents: { ...agents, consultor: { description: "Opus. Decide." } }, quota: null, now: NOW_MS });
+    expect(p).toContain("subagent_type: \"consultor\"");
+    expect(p).toMatch(/consultor \(Opus, solo lectura\).*decisiones de diseño o de riesgo.*revisión delicada/s);
+    expect(p).toMatch(/tú \(el orquestador\) analizas/);
+    const regla = /consultor \(Opus[^.]*\./.exec(p)[0];
+    expect(regla.length).toBeLessThan(400);
+  });
+
   it("refleja el reparto Opus/Sonnet/Haiku y la excepción de una línea", () => {
     const p = buildOrchestratorPrompt({ agents, quota: null, now: NOW_MS });
     expect(p).toMatch(/asistente \(Haiku\).*web.*navegador/s);
@@ -102,8 +111,11 @@ Haces tareas acotadas.
   it("los perfiles que trae el router son válidos y usan Haiku y Sonnet", async () => {
     const { loadAgents } = await import("../src/core/agents.mjs");
     const agents = await loadAgents(new URL("../src/agents", import.meta.url).pathname);
-    expect(Object.keys(agents)).toEqual(["asistente", "programador"]);
+    expect(Object.keys(agents)).toEqual(["asistente", "consultor", "programador"]);
     expect(agents.asistente.model).toBe("haiku");
+    expect(agents.consultor.model).toBe("opus");
+    expect(agents.consultor.tools).toEqual(["Read", "Grep", "Glob", "WebSearch", "WebFetch"]);
+    expect(agents.consultor.prompt).toMatch(/no edit/i);
     expect(agents.programador.model).toBe("sonnet");
     expect(agents.asistente.prompt.length).toBeGreaterThan(50);
     // Web y navegador: forma documentada (comodín por servidor MCP).

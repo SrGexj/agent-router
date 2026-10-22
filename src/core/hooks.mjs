@@ -123,13 +123,15 @@ export function translateHook(p, session, now, makeRunId, ctx = {}) {
     const before = open ? { runId: open, events: cancelEvents(t, ctx.orchestratorUsage) } : undefined;
     const seq = session.seq + 1;
     const runId = makeRunId(now, String(p.session_id ?? "sesion").slice(0, 8), seq);
-    const next = { runId, lastRunId: runId, seq };
+    const next = { runId, lastRunId: runId, seq, ...(ctx.mainModel && { mainModel: ctx.mainModel }) };
     if (ctx.transcriptSize != null) next.transcriptOffset = ctx.transcriptSize;
     const res = {
       runId,
       session: next,
       events: [{ type: "run_start", runId, task: p.prompt ?? "", mode: "sesion", model: "opus", cwd: p.cwd ?? null, profile: ctx.profile ?? "trabajo", ...(ctx.directEdits > 0 && { directEdits: ctx.directEdits }), t }]
     };
+    // Etiqueta del orquestador desde el primer mensaje, sin esperar al primer hook en vivo.
+    if (ctx.mainModel) res.events.push({ type: "main_model", model: ctx.mainModel, t });
     if (before) res.before = before;
     // Solo al abrir ejecución: el proceso del hook lanza el clasificador en modo sombra con este prompt ya saneado.
     const shadowPrompt = sanitizePrompt(p.prompt).trim();

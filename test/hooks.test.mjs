@@ -372,6 +372,15 @@ describe("modelo real del orquestador (main_model)", () => {
     expect(again.events.map((e) => e.type)).toEqual(["orchestrator_usage"]);
   });
 
+  it("UserPromptSubmit con ctx.mainModel emite main_model tras run_start y lo recuerda en la sesión", () => {
+    const res = translateHook({ ...base, hook_event_name: "UserPromptSubmit", prompt: "hola" }, { runId: null, seq: 0 }, T, makeRunId, { mainModel: "claude-sonnet-5-5" });
+    expect(res.events.map((e) => e.type)).toEqual(["run_start", "main_model"]);
+    expect(res.events[1]).toMatchObject({ model: "claude-sonnet-5-5" });
+    expect(res.session.mainModel).toBe("claude-sonnet-5-5");
+    const none = translateHook({ ...base, hook_event_name: "UserPromptSubmit", prompt: "hola" }, { runId: null, seq: 0 }, T, makeRunId, {});
+    expect(none.events.map((e) => e.type)).toEqual(["run_start"]);
+  });
+
   it("run_start model fijo no pisa el main_model real en el reducer", () => {
     const run = reduceEvents([
       { type: "run_start", runId: "r", task: "x", mode: "sesion", model: "opus", cwd: "/", t: 0 },

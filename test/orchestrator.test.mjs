@@ -46,6 +46,12 @@ describe("buildOrchestratorPrompt", () => {
     expect(p).toMatch(/sin datos de cuota/i);
   });
 
+  it("no nombra a Opus: el orquestador puede ser otro modelo (co --model sonnet)", () => {
+    const p = buildOrchestratorPrompt({ agents, quota: null, now: NOW_MS });
+    expect(p).toMatch(/tú \(el orquestador\) analizas/);
+    expect(p).not.toMatch(/tú \(Opus\)/);
+  });
+
   it("refleja el reparto Opus/Sonnet/Haiku y la excepción de una línea", () => {
     const p = buildOrchestratorPrompt({ agents, quota: null, now: NOW_MS });
     expect(p).toMatch(/asistente \(Haiku\).*web.*navegador/s);

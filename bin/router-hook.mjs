@@ -185,7 +185,13 @@ try {
       try { await onCompactStats(payload, session, store); } catch { /* el coste es accesorio: nunca impide inyectar pendientes */ }
       await onSessionStartCompact(payload, Date.now());
     }
-    if (payload.source === "startup") await onSessionStartup(payload, Date.now());
+    if (payload.source === "startup") {
+      await onSessionStartup(payload, Date.now());
+      // El primer mensaje aún no tiene assistant en el transcript: el modelo de SessionStart (opcional) cubre ese hueco.
+      if (typeof payload.model === "string" && payload.model) {
+        try { await sessions.saveFlags(payload.session_id, { ...(await sessions.loadFlags(payload.session_id)), startModel: payload.model }); } catch { /* accesorio */ }
+      }
+    }
     process.exit(0);
   }
 
@@ -221,6 +227,10 @@ try {
     // Solo aviso: nunca permissionDecision.
     await sessions.saveFlags(payload.session_id, { ...flags, directEdits: ctx.directEdits + 1 });
     additionalContext("PreToolUse", DIRECT_EDIT_WARNING);
+  }
+  if (payload.hook_event_name === "UserPromptSubmit") {
+    const fromTranscript = payload.transcript_path ? lastModelOf(await readSince(payload.transcript_path, 0, TAIL_BYTES).catch(() => "")) : null;
+    ctx.mainModel = fromTranscript ?? flags?.startModel ?? null;
   }
   if (payload.hook_event_name === "UserPromptSubmit" && payload.transcript_path) {
     ctx.transcriptSize = await transcriptSize(payload.transcript_path);

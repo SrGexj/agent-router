@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { reduceEvents, reduceRun } from "../src/core/reducer.mjs";
 import { derivePhase, PHASES } from "../src/core/view.mjs";
 import { packetsFor, truncate } from "../dashboard/src/packets.js";
-import { captionFor, fmtDuration, summaryLine, orchestratorSub, workerSub, layaNode, spendPending, spendLabels, ownTypes, orchestratorName } from "../dashboard/src/captions.js";
+import { captionFor, fmtDuration, summaryLine, orchestratorSub, workerSub, layaNode, spendPending, spendLabels, ownTypes, orchestratorName, routeName } from "../dashboard/src/captions.js";
 import { spendShare } from "../src/core/details.mjs";
 import { DEMO_EVENTS, DEMO_LENGTH, demoRunAt, phaseSpans } from "../dashboard/src/demo.js";
 import { iso, boxFaces, bezierPoint, shadowLink, LAYA } from "../dashboard/src/scene/geometry.js";
@@ -299,7 +299,7 @@ describe("nodo Laya (sombra) de la escena", () => {
     const n = layaNode(reduceEvents([ses, route()]), 1000);
     expect(n).toMatchObject({ text: "Programador 63 %", verdict: null });
     expect(n.title).toContain("Cambio de código");
-    expect(layaNode(reduceEvents([ses, route({ choice: "opus", confidence: 0.9 })]), 1000).text).toBe("Opus 90 %");
+    expect(layaNode(reduceEvents([ses, route({ choice: "opus", confidence: 0.9 })]), 1000).text).toBe("Orquestador 90 %");
     expect(layaNode(reduceEvents([ses, route({ confidence: null })]), 1000).text).toBe("Programador");
   });
 
@@ -373,6 +373,21 @@ describe("nombre del orquestador sin Opus fijo", () => {
   const tasks = [
     { type: "task_start", taskId: "a", agent: "Explore", description: "", prompt: "", t: 2 }
   ];
+
+  it("routeName: la ruta interna opus se muestra como el orquestador real", () => {
+    expect(routeName("opus", sonnet())).toBe("Orquestador (Sonnet)");
+    expect(routeName("opus", reduceEvents([start]))).toBe("Orquestador");
+    expect(routeName("opus", null)).toBe("Orquestador");
+    expect(routeName("programador", sonnet())).toBe("Programador");
+    expect(routeName("asistente")).toBe("Asistente");
+    expect(routeName("raro")).toBe("raro");
+  });
+
+  it("layaNode con orquestador Sonnet no dice Opus", () => {
+    const run = reduceEvents([{ ...start, mode: "sesion" }, { type: "main_model", model: "claude-sonnet-5-5", t: 1 }, { type: "shadow_route", model: "laya", choice: "opus", confidence: 0.9, reason: "x", latencyMs: 1, costUsd: 0, t: 500 }]);
+    expect(layaNode(run, 1000).text).toBe("Orquestador (Sonnet) 90 %");
+    expect(layaNode(run, 1000).title).toContain("orquestador (sonnet)");
+  });
 
   it("orchestratorName: modelo real, o Orquestador si no se conoce", () => {
     expect(orchestratorName(sonnet())).toBe("Sonnet");

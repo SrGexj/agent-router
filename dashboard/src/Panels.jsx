@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { fmtClock, fmtCost, fmtCostFine, fmtDuration, fmtTokens, fmtModel, fmtTokenTypes, orchestratorName } from "./captions.js";
+import { fmtClock, fmtCost, fmtCostFine, fmtDuration, fmtTokens, fmtModel, fmtTokenTypes, orchestratorName, routeName } from "./captions.js";
 import { truncate } from "./packets.js";
 import WindowLine from "./WindowLine.jsx";
 import { useProfileLabel } from "./profiles.js";
@@ -25,7 +25,6 @@ function SavingsBlock({ savings }) {
   );
 }
 
-const ROUTE_NAME = { asistente: "Asistente", programador: "Programador", opus: "Opus" };
 const ROUTES = ["asistente", "programador", "opus"];
 
 // Aciertos del clasificador frente a lo que hizo el orquestador: una línea y el resto plegado. Oculto sin ejecuciones comparables.
@@ -39,11 +38,11 @@ function ShadowBlock({ shadow }) {
         <summary>{l.summary}</summary>
         {l.detail.map((t, i) => <div key={i} className="qmeta" {...(t.startsWith("(no incluye") ? { "data-others": true } : t.startsWith("Datos para") ? { "data-testid": "training-count" } : {})}>{t}</div>)}
         <table className="smatrix">
-          <thead><tr><th>{shadow.name} \ real</th>{ROUTES.map((r) => <th key={r}>{ROUTE_NAME[r]}</th>)}</tr></thead>
+          <thead><tr><th>{shadow.name} \ real</th>{ROUTES.map((r) => <th key={r}>{routeName(r)}</th>)}</tr></thead>
           <tbody>
             {ROUTES.map((j) => (
               <tr key={j}>
-                <th>{ROUTE_NAME[j]}</th>
+                <th>{routeName(j)}</th>
                 {ROUTES.map((r) => <td key={r} className={j === r ? "diag" : ""}>{shadow.byPair[j]?.[r] ?? 0}</td>)}
               </tr>
             ))}
@@ -85,7 +84,7 @@ export function QuotaPanel({ quotas, now, savingsByProfile, shadowByProfile }) {
         );
       })}
       {entries.length > 0 ? (
-        <p className="note">{anySavings && "Estimado con precios de API; con suscripción no pagas por token. "}Opus delega más cuanto más alta está la cuota de su cuenta.</p>
+        <p className="note">{anySavings && "Estimado con precios de API; con suscripción no pagas por token. "}El orquestador delega más cuanto más alta está la cuota de su cuenta.</p>
       ) : (
         <p className="note">Aparece tras la primera respuesta en <code>co</code>, <code>cop</code> o <code>router</code>.</p>
       )}
@@ -281,7 +280,7 @@ function LabelRow({ run }) {
           const auto = on && current.source === "auto";
           return (
             <button key={r} type="button" disabled={sending} aria-pressed={on} data-label={r} className={`${on ? "on" : ""} ${auto ? "auto" : ""}`} onClick={() => send(r)}>
-              {ROUTE_NAME[r]}{auto ? " (auto)" : ""}
+              {routeName(r, run)}{auto ? " (auto)" : ""}
             </button>
           );
         })}
@@ -308,8 +307,8 @@ function Shadow({ run }) {
         : (
           <div className="dshadow">
             <p className="sline">
-              {name} eligió: <b>{ROUTE_NAME[v.choice] ?? v.choice}</b>{v.confidence != null ? ` (${Math.round(v.confidence * 100)} %)` : ""}
-              {v.actual ? <> · {orchestratorName(run)} hizo: <b>{ROUTE_NAME[v.actual]}</b>{v.targetSource === "usuario" && v.target !== v.actual ? <> · tu etiqueta: <b>{ROUTE_NAME[v.target]}</b></> : null} → <span className={`stag ${v.match ? "ok" : "warn"}`}>{v.match ? "coincide" : "no coincide"}</span></> : <> · {orchestratorName(run)} aún no ha terminado</>}
+              {name} eligió: <b>{routeName(v.choice, run)}</b>{v.confidence != null ? ` (${Math.round(v.confidence * 100)} %)` : ""}
+              {v.actual ? <> · Real: <b>{routeName(v.actual, run)}</b>{v.targetSource === "usuario" && v.target !== v.actual ? <> · tu etiqueta: <b>{routeName(v.target, run)}</b></> : null} → <span className={`stag ${v.match ? "ok" : "warn"}`}>{v.match ? "coincide" : "no coincide"}</span></> : <> · {orchestratorName(run)} aún no ha terminado</>}
             </p>
             {v.reason && <p className="sreason">{v.reason}</p>}
             <p className="sreason">

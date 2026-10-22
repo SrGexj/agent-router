@@ -68,7 +68,15 @@ export function ownTypes(run) {
 
 // Tras este tiempo sin respuesta de Laya en una ejecución en curso se deja de esperarla (sombra desactivada o caída).
 export const LAYA_WAIT_MS = 30_000;
-const ROUTE_NAME = { asistente: "Asistente", programador: "Programador", opus: "Opus" };
+const ROUTE_NAME = { asistente: "Asistente", programador: "Programador" };
+
+// Nombre de una ruta en la UI. La clave interna "opus" (datos guardados y clasificador) significa "lo lleva el propio
+// orquestador, sin delegar": se muestra con el modelo real (co --model sonnet) y no como "Opus".
+export function routeName(route, run) {
+  if (route !== "opus") return ROUTE_NAME[route] ?? route;
+  const name = orchestratorName(run);
+  return name === "Orquestador" ? name : `Orquestador (${name})`;
+}
 
 // Nodo "Laya (sombra)" de la escena: null = no se pinta (demo, router CLI, ejecuciones sin shadow).
 // Solo las sesiones co lanzan el clasificador, así que ahí es donde tiene sentido esperarlo.
@@ -84,7 +92,7 @@ export function layaNode(run, now) {
   if (sh.error || !v.choice) {
     return { text: "sin respuesta", dot: "warn", title: sh.error ? `Laya: ${sh.error}` : "Laya no devolvió ninguna elección", verdict: null };
   }
-  const name = ROUTE_NAME[v.choice] ?? v.choice;
+  const name = routeName(v.choice, run);
   const text = v.confidence == null ? name : `${name} ${Math.round(v.confidence * 100)} %`;
   const title = [`Laya habría elegido ${name.toLowerCase()}`, sh.reason].filter(Boolean).join(": ");
   let verdict = null;

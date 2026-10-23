@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   trainingRows, csvField, toCsv, CSV_HEADER, inEvalSet, splitRows, distribution, classWarnings, checkMinimum,
-  toJsonl, withSeeds, parseLocalSeeds, scoreEval, compareScores, layaTrainArgs
+  toJsonl, withSeeds, addSeeds, SEED_EVAL_RATIO, parseLocalSeeds, scoreEval, compareScores, layaTrainArgs
 } from "../src/core/laya-data.mjs";
 
 const run = (id, task, over = {}) => ({
@@ -14,6 +14,7 @@ describe("trainingRows", () => {
     const runs = [
       run("b", 'Revisa esto <pasted_content id="1">uno\ndos\ntres</pasted_content>', withTask("programador")),
       run("a", "Dime qué opinas", { routeLabel: { label: "opus", t: 1 } }),
+      run("e", "charla sin delegar"),
       run("c", "tarea fallida", { status: "failed" }),
       run("d", "   ", {})
     ];
@@ -22,12 +23,23 @@ describe("trainingRows", () => {
       { text: "Revisa esto [texto pegado: 3 líneas]", label: "programador", profile: "trabajo", source: "auto", runId: "b" }
     ]);
   });
+  it("excluye runs sin subagente salvo corrección manual; consultor y propio entran como opus", () => {
+    const runs = [
+      run("a", "sin nada"),
+      run("b", "corregido", { routeLabel: { label: "programador", t: 1 } }),
+      run("c", "con consultor", withTask("consultor")),
+      run("d", "con propio", withTask("propio"))
+    ];
+    expect(trainingRows(runs).map((r) => [r.runId, r.label, r.source])).toEqual([
+      ["b", "programador", "usuario"], ["c", "opus", "auto"], ["d", "opus", "auto"]
+    ]);
+  });
   it("filtra por perfil (todos por defecto)", () => {
-    const runs = [run("a", "x", { profile: "personal" }), run("b", "y")];
+    const runs = [run("a", "x", { profile: "personal", ...withTask("programador") }), run("b", "y", withTask("programador"))];
     expect(trainingRows(runs, { profile: "personal" }).map((r) => r.runId)).toEqual(["a"]);
     expect(trainingRows(runs, { profile: "trabajo" }).map((r) => r.runId)).toEqual(["b"]);
     expect(trainingRows(runs, { profile: "todos" })).toHaveLength(2);
-    expect(trainingRows([{ ...run("c", "z"), profile: undefined }], { profile: "trabajo" })).toHaveLength(1);
+    expect(trainingRows([{ ...run("c", "z", withTask("programador")), profile: undefined }], { profile: "trabajo" })).toHaveLength(1);
   });
 });
 
@@ -63,6 +75,21 @@ describe("conjunto de evaluación", () => {
     expect(train.length + ev.length).toBe(100);
     expect(new Set([...train, ...ev].map((r) => r.runId)).size).toBe(100);
     expect(ev.length).toBeGreaterThan(5);
+  });
+  it("mismo texto (con otro runId) cae siempre del mismo lado", () => {
+    const rows = Array.from({ length: 300 }, (_, i) => ({ text: `texto ${i % 60}`, label: "opus", runId: `id-${i}` }));
+    const { train, eval: ev } = splitRows(rows, 0.2);
+    const inTrain = new Set(train.map((r) => r.text));
+    expect(ev.some((r) => inTrain.has(r.text))).toBe(false);
+    expect(ev.length).toBeGreaterThan(0);
+    expect(splitRows(rows, 0.2).eval.map((r) => r.runId)).toEqual(ev.map((r) => r.runId));
+  });
+  it("el texto se compara sin mayúsculas ni espacios sobrantes", () => {
+    const rows = Array.from({ length: 40 }, (_, i) => [
+      { text: `Hola   mundo ${i}`, runId: `a${i}` }, { text: `hola mundo ${i} `, runId: `b${i}` }
+    ]).flat();
+    const { eval: ev } = splitRows(rows, 0.5);
+    expect(ev.length % 2).toBe(0);
   });
 });
 
@@ -143,6 +170,55 @@ describe("semillas versionadas", () => {
   it("toJsonl las serializa como cualquier fila", () => {
     const l = JSON.parse(toJsonl(withSeeds([])).split("\n")[0]);
     expect(l.expected).toEqual({ route: "opus" });
+  });
+});
+
+describe("semillas y evaluación", () => {
+  it("una semilla cuyo texto está en eval no entra al train", () => {
+    const manual = withSeeds([]).find((r) => r.origin === "manual").text;
+    const out = withSeeds([], [{ text: "local", label: "opus", origin: "historico" }], [{ text: manual }, { text: " LOCAL " }]);
+    expect(out.some((r) => r.text === manual)).toBe(false);
+    expect(out.some((r) => r.text === "local")).toBe(false);
+    expect(out.length).toBe(withSeeds([]).length - 1);
+  });
+});
+
+describe("addSeeds: reparto de semillas entre train y eval", () => {
+  const manual = withSeeds([]).filter((r) => r.source === "semilla");
+  const keys = (rs) => rs.map((r) => r.text.trim().replace(/\s+/g, " ").toLowerCase());
+  it("determinista y con ~75/25 sobre las manuales", () => {
+    const a = addSeeds([], []);
+    const b = addSeeds([], []);
+    expect(a).toEqual(b);
+    expect(a.train.length + a.eval.length).toBe(manual.length);
+    expect(SEED_EVAL_RATIO).toBe(0.25);
+    expect(a.eval.length).toBeGreaterThan(0);
+    expect(a.eval.length / manual.length).toBeGreaterThan(0.1);
+    expect(a.eval.length / manual.length).toBeLessThan(0.4);
+    expect(a.train.every((r) => r.source === "semilla") && a.eval.every((r) => r.source === "semilla")).toBe(true);
+  });
+  it("ninguna semilla está a la vez en train y eval, y mismo texto = mismo lado", () => {
+    const local = Array.from({ length: 80 }, (_, i) => ({ text: `local ${i}`, label: "opus", origin: "historico" }));
+    const a = addSeeds([], [], local);
+    const t = new Set(keys(a.train));
+    expect(keys(a.eval).some((k) => t.has(k))).toBe(false);
+    const again = addSeeds([], [], [...local].reverse());
+    expect(new Set(keys(again.eval))).toEqual(new Set(keys(a.eval)));
+    expect(a.eval.length / (a.train.length + a.eval.length)).toBeGreaterThan(0.15);
+  });
+  it("conserva las filas reales y no repite textos de filas reales de ningún lado", () => {
+    const m = manual[0].text;
+    const m2 = manual[1].text;
+    const out = addSeeds([{ text: m, label: "programador" }], [{ text: m2, label: "programador" }]);
+    expect(out.train.filter((r) => r.text === m)).toHaveLength(1);
+    expect([...out.train, ...out.eval].filter((r) => r.text === m2)).toHaveLength(1);
+    expect(out.eval.find((r) => r.text === m2).source).toBeUndefined();
+    expect(out.eval.some((r) => r.text === m)).toBe(false);
+    expect(out.train.find((r) => r.text === m).label).toBe("programador");
+  });
+  it("las semillas locales también se reparten", () => {
+    const out = addSeeds([], [], [{ text: "solo local", label: "opus", origin: "historico" }]);
+    expect([...out.train, ...out.eval].filter((r) => r.text === "solo local")).toHaveLength(1);
   });
 });
 

@@ -307,11 +307,13 @@ export function actualRoute(run) {
 }
 
 // Etiqueta para entrenar: la corrección del usuario manda; si no, lo que hizo Opus (solo si terminó bien).
+// Sin ningún encargo a subagente (ni propio ni consultor) Opus no enrutó nada: sin corrección manual no es ejemplo de ruta.
 export function trainingLabel(run) {
   if (!run || esRunAvisoDelSistema(run)) return null;
   const fixed = run.routeLabel?.label;
   if (fixed) return { label: fixed, source: "usuario" };
   if (run.status !== "completed") return null;
+  if ((run.taskOrder ?? []).length === 0) return null;
   const label = actualRoute(run);
   return label ? { label, source: "auto" } : null;
 }

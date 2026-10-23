@@ -7,7 +7,7 @@ import { reduceEvents } from "./reducer.mjs";
 import { CHOICES } from "./classifier.mjs";
 import { defaultPlatform } from "./platform/index.mjs";
 import {
-  trainingRows, withSeeds, parseLocalSeeds, toCsv, toJsonl, splitRows, distribution, classWarnings, checkMinimum, scoreEval, compareScores, layaTrainArgs, rowsFromJsonl,
+  trainingRows, addSeeds, parseLocalSeeds, toCsv, toJsonl, splitRows, distribution, classWarnings, checkMinimum, scoreEval, compareScores, layaTrainArgs, rowsFromJsonl,
   DEFAULT_EVAL_RATIO, MIN_PER_CLASS
 } from "./laya-data.mjs";
 
@@ -89,8 +89,12 @@ async function prepareData({ store, opts, dataDir, seedsFile, log }) {
     return { trainJsonl, evalJsonl, train, ev, dist: distribution(train) };
   }
   const rows = trainingRows(await loadRuns(store), { profile: opts.profile });
-  const dist = distribution(rows);
-  describeDist(dist, rows, log);
+  const split = splitRows(rows, DEFAULT_EVAL_RATIO);
+  // Las semillas se reparten train/eval; el mínimo cuenta las que entran al train.
+  const seeded = addSeeds(split.train, split.eval, await loadLocalSeeds(seedsFile));
+  const counted = [...rows, ...seeded.train.filter((r) => r.source === "semilla")];
+  const dist = distribution(counted);
+  describeDist(dist, counted, log);
   const min = checkMinimum(dist);
   if (!min.ok && !opts.force) {
     log(`No se entrena: ${min.reasons.join("; ")}.`);
@@ -98,11 +102,15 @@ async function prepareData({ store, opts, dataDir, seedsFile, log }) {
     return { refused: true, dist };
   }
   if (!min.ok) log(`Aviso (--forzar): ${min.reasons.join("; ")}.`);
-  const { train, eval: ev } = await writeSplit(rows, join(dataDir, "train.csv"), join(dataDir, "eval.csv"), DEFAULT_EVAL_RATIO);
+  await mkdir(dataDir, { recursive: true });
+  await writeFile(join(dataDir, "train.csv"), toCsv(split.train));
+  await writeFile(join(dataDir, "eval.csv"), toCsv(split.eval));
   // Para entrenar y evaluar se usa JSONL con el mismo estado y preguntas que el servicio (el CSV de laya-train sintetiza otra pregunta).
   const trainJsonl = join(dataDir, "train.jsonl");
   const evalJsonl = join(dataDir, "eval.jsonl");
-  await writeFile(trainJsonl, toJsonl(withSeeds(train, await loadLocalSeeds(seedsFile)))); // semillas solo en entrenamiento, nunca en evaluación
+  const train = seeded.train;
+  const ev = seeded.eval;
+  await writeFile(trainJsonl, toJsonl(train));
   await writeFile(evalJsonl, toJsonl(ev));
   log(`Datos en ${dataDir} (${train.length} para entrenar, ${ev.length} para evaluar)`);
   return { trainJsonl, evalJsonl, train, ev, dist };

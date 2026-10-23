@@ -151,10 +151,28 @@ export function scoreEval(gold, preds) {
   return { n, accuracy: n ? correct / n : null, byClass };
 }
 
+// Caída máxima por clase (puntos porcentuales) que se tolera aunque la global suba.
+export const MAX_CAIDA_CLASE = 0.05;
+
+// Clases con ejemplos en eval que empeoran más de MAX_CAIDA_CLASE o que quedan en 0 %.
+function regresionesPorClase(base, nuevo) {
+  const out = [];
+  for (const clase of CHOICES) {
+    const b = base?.byClass?.[clase];
+    const n = nuevo?.byClass?.[clase];
+    if (!b?.n || b.accuracy == null || n?.accuracy == null) continue;
+    if (b.accuracy - n.accuracy > MAX_CAIDA_CLASE + 1e-9 || (n.accuracy === 0 && b.accuracy > 0)) out.push({ clase, base: b.accuracy, nuevo: n.accuracy });
+  }
+  return out;
+}
+
 export function compareScores(base, nuevo) {
-  if (base?.accuracy == null || nuevo?.accuracy == null) return { winner: "empate", delta: null };
+  if (base?.accuracy == null || nuevo?.accuracy == null) return { winner: "empate", delta: null, regresiones: [] };
   const delta = nuevo.accuracy - base.accuracy;
-  return { winner: delta > 1e-9 ? "nuevo" : delta < -1e-9 ? "base" : "empate", delta };
+  if (delta < -1e-9) return { winner: "base", delta, regresiones: [] };
+  if (delta <= 1e-9) return { winner: "empate", delta, regresiones: [] };
+  const regresiones = regresionesPorClase(base, nuevo);
+  return { winner: regresiones.length ? "regresion" : "nuevo", delta, regresiones };
 }
 
 // Filas de un JSONL de laya-train (datos externos) en la forma que usa scoreEval: {label, text}.

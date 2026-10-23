@@ -143,9 +143,13 @@ export async function layaEntrenar({ store, config, exec, now, opts, log = conso
   const base = scoreEval(ev, await predict({ config, exec, model: config.laya.base, dataPath: evalJsonl, outPath: join(dataDir, "pred-base.json") }));
   const nuevo = scoreEval(ev, await predict({ config, exec, model: modelDir, dataPath: evalJsonl, outPath: join(dataDir, "pred-nuevo.json") }));
   printScores(log, base, nuevo);
-  const { winner } = compareScores(base, nuevo);
+  const { winner, regresiones } = compareScores(base, nuevo);
   if (winner === "nuevo") {
     log(`\nEl modelo nuevo mejora al base. Para usarlo: router laya-usar ${modelDir}`);
+  } else if (winner === "regresion") {
+    log("\nLa global sube, pero el modelo nuevo empeora estas clases (base → nuevo):");
+    for (const r of regresiones) log(`  ${r.clase}: ${pct(r.base)} → ${pct(r.nuevo)}`);
+    log("No se propone cambiar: el modelo parece haber colapsado hacia otras clases. Más datos etiquetados de esas clases ayudarán.");
   } else {
     log(`\n${winner === "base" ? "El base sigue ganando" : "Empate"}: no se propone cambiar. Más datos etiquetados ayudarán.`);
   }

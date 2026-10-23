@@ -2,7 +2,8 @@ import { describe, it, expect } from "vitest";
 import { CHOICES } from "../src/core/classifier.mjs";
 import {
   trainingRows, csvField, toCsv, CSV_HEADER, inEvalSet, splitRows, distribution, classWarnings, checkMinimum,
-  toJsonl, withSeeds, addSeeds, SEED_EVAL_RATIO, parseLocalSeeds, scoreEval, compareScores, layaTrainArgs
+  toJsonl, withSeeds, addSeeds, SEED_EVAL_RATIO, parseLocalSeeds, scoreEval, compareScores, layaTrainArgs,
+  oversample, sourceBreakdown, TRAIN_DEFAULTS
 } from "../src/core/laya-data.mjs";
 
 const run = (id, task, over = {}) => ({
@@ -335,5 +336,69 @@ describe("semillas locales (JSONL fuera del repo)", () => {
     expect(out.filter((r) => r.text === "local")).toEqual([{ text: "local", label: "opus", origin: "historico", source: "semilla" }]);
     expect(out.filter((r) => r.text === manual)).toHaveLength(1);
     expect(out.filter((r) => r.text === "fila")).toHaveLength(1);
+  });
+});
+
+describe("layaTrainArgs: ajustes de entreno", () => {
+  const base = { data: "d.jsonl", out: "o", base: "multilingual" };
+  it("propaga loss, epochs, eval, freezeEncoder y seed con los nombres reales de laya-train", () => {
+    const a = layaTrainArgs({ ...base, loss: "soft-ce", epochs: 6, eval: "e.jsonl", freezeEncoder: true, seed: 3 });
+    expect(a.slice(a.indexOf("--loss"), a.indexOf("--loss") + 2)).toEqual(["--loss", "soft-ce"]);
+    expect(a[a.indexOf("--epochs") + 1]).toBe("6");
+    expect(a[a.indexOf("--eval") + 1]).toBe("e.jsonl");
+    expect(a).toContain("--freeze-encoder");
+    expect(a[a.indexOf("--seed") + 1]).toBe("3");
+  });
+  it("seed 0 se pasa; sin freezeEncoder no hay flag; sin nada no se añade nada", () => {
+    expect(layaTrainArgs({ ...base, seed: 0 })).toEqual([...layaTrainArgs(base), "--seed", "0"]);
+    expect(layaTrainArgs({ ...base, freezeEncoder: false })).not.toContain("--freeze-encoder");
+    expect(layaTrainArgs(base)).toEqual(["--data", "d.jsonl", "--out", "o", "--base", "multilingual"]);
+  });
+  it("valores por defecto del entreno", () => {
+    expect(TRAIN_DEFAULTS).toMatchObject({ loss: "soft-ce", gradAccum: 8, epochs: 6 });
+  });
+});
+
+describe("oversample", () => {
+  const mk = (label, n) => Array.from({ length: n }, (_, i) => ({ text: `${label}-${i}`, label }));
+  const items = [...mk("programador", 10), ...mk("asistente", 4), ...mk("opus", 3)];
+  it("iguala las clases minoritarias a la mayoritaria", () => {
+    expect(distribution(oversample(items, { seed: 1 }))).toEqual({ asistente: 10, programador: 10, opus: 10 });
+  });
+  it("no toca la clase mayoritaria ni quita originales, y no modifica la entrada", () => {
+    const copy = JSON.parse(JSON.stringify(items));
+    const out = oversample(items, { seed: 1 });
+    expect(items).toEqual(copy);
+    expect(out.slice(0, items.length)).toEqual(items);
+    expect(out.filter((r) => r.label === "programador")).toEqual(mk("programador", 10));
+  });
+  it("los duplicados salen de la propia clase y se reparten por igual (+-1)", () => {
+    const out = oversample(items, { seed: 1 });
+    const counts = {};
+    for (const r of out.filter((r) => r.label === "opus")) counts[r.text] = (counts[r.text] ?? 0) + 1;
+    expect(Object.keys(counts).sort()).toEqual(["opus-0", "opus-1", "opus-2"]);
+    expect(Math.max(...Object.values(counts)) - Math.min(...Object.values(counts))).toBeLessThanOrEqual(1);
+  });
+  it("es determinista con la misma semilla y puede variar con otra", () => {
+    expect(oversample(items, { seed: 7 })).toEqual(oversample(items, { seed: 7 }));
+    expect(oversample(items, { seed: 7 })).not.toEqual(oversample(items, { seed: 8 }));
+  });
+  it("sin clases vacías que inventar: una clase con 0 se queda en 0; entrada vacía da vacío", () => {
+    expect(distribution(oversample([...mk("programador", 4), ...mk("opus", 2)], { seed: 1 })).asistente).toBe(0);
+    expect(oversample([], { seed: 1 })).toEqual([]);
+  });
+});
+
+describe("sourceBreakdown", () => {
+  it("cuenta por clase corrección manual, automáticas y semillas", () => {
+    const rows = [
+      { label: "opus", source: "usuario" }, { label: "opus", source: "auto" }, { label: "opus", source: "semilla" },
+      { label: "asistente", source: "auto" }, { label: "asistente", source: "auto" }
+    ];
+    expect(sourceBreakdown(rows)).toEqual({
+      asistente: { usuario: 0, auto: 2, semilla: 0 },
+      programador: { usuario: 0, auto: 0, semilla: 0 },
+      opus: { usuario: 1, auto: 1, semilla: 1 }
+    });
   });
 });

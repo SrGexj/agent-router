@@ -153,6 +153,33 @@ describe("evaluación", () => {
     expect(compareScores({ accuracy: 0.7 }, { accuracy: 0.6 }).winner).toBe("base");
     expect(compareScores({ accuracy: null }, { accuracy: 0.6 }).winner).toBe("empate");
   });
+  const cls = (a, p, o) => ({ asistente: { n: 10, accuracy: a }, programador: { n: 10, accuracy: p }, opus: { n: 10, accuracy: o } });
+  it("compareScores: caso real, global sube pero el modelo colapsa a programador -> regresion", () => {
+    const r = compareScores({ accuracy: 0.485, byClass: cls(0.3, 0.75, 0.188) }, { accuracy: 0.5, byClass: cls(0.1, 1, 0) });
+    expect(r.winner).toBe("regresion");
+    expect(r.regresiones).toEqual([
+      { clase: "asistente", base: 0.3, nuevo: 0.1 },
+      { clase: "opus", base: 0.188, nuevo: 0 }
+    ]);
+  });
+  it("compareScores: mejora limpia por clase sigue dando nuevo", () => {
+    const r = compareScores({ accuracy: 0.5, byClass: cls(0.3, 0.5, 0.5) }, { accuracy: 0.7, byClass: cls(0.6, 0.8, 0.7) });
+    expect(r.winner).toBe("nuevo");
+    expect(r.regresiones).toEqual([]);
+  });
+  it("compareScores: una caida de hasta 5 puntos se tolera; clases sin ejemplos se ignoran", () => {
+    const byBase = { ...cls(0.5, 0.5, 0.5), opus: { n: 0, accuracy: null } };
+    const byNuevo = { ...cls(0.46, 0.9, 0.9), opus: { n: 0, accuracy: null } };
+    expect(compareScores({ accuracy: 0.5, byClass: byBase }, { accuracy: 0.7, byClass: byNuevo }).winner).toBe("nuevo");
+  });
+  it("compareScores: clase que queda en 0 % es regresion aunque la caida sea corta", () => {
+    const r = compareScores({ accuracy: 0.5, byClass: cls(0.03, 0.5, 0.5) }, { accuracy: 0.7, byClass: cls(0, 0.9, 0.9) });
+    expect(r.winner).toBe("regresion");
+  });
+  it("compareScores: si la global no sube no se llama regresion", () => {
+    expect(compareScores({ accuracy: 0.7, byClass: cls(0.7, 0.7, 0.7) }, { accuracy: 0.6, byClass: cls(0.1, 0.9, 0.8) }).winner).toBe("base");
+    expect(compareScores({ accuracy: 0.7, byClass: cls(0.7, 0.7, 0.7) }, { accuracy: 0.7, byClass: cls(0.1, 0.9, 0.9) }).winner).toBe("empate");
+  });
 });
 
 describe("semillas versionadas", () => {

@@ -173,6 +173,24 @@ describe("laya-entrenar", () => {
     expect(logs.join("\n")).not.toMatch(/router laya-usar/);
   });
 
+  it("si la global sube pero una clase se hunde, avisa de la regresión y no propone el cambio", async () => {
+    await seed("a", 30, "asistente");
+    await seed("p", 30, "programador");
+    await seed("o", 30, "opus");
+    const exec = async (cmd, args) => {
+      if (cmd.endsWith("laya-train")) return { code: 0 };
+      const rows = (await readFile(args[1], "utf8")).trim().split("\n").map((l) => JSON.parse(l));
+      const base = args[2] === "multilingual";
+      await writeFile(args[3], JSON.stringify(rows.map((r) => (base ? ("asistente") : (r.expected.route === "asistente" ? "programador" : r.expected.route)))));
+      return { code: 0 };
+    };
+    const res = await layaEntrenar({ store, config, exec, now: NOW, opts, log });
+    expect(res.winner).toBe("regresion");
+    const text = logs.join("\n");
+    expect(text).toMatch(/asistente: 100,0 % → 0,0 %/);
+    expect(text).not.toMatch(/router laya-usar/);
+  });
+
   it("--forzar salta el mínimo y --simular solo hace dry-run", async () => {
     await seed("a", 6, "asistente");
     await seed("p", 6, "programador");

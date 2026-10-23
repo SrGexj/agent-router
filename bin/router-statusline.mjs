@@ -6,6 +6,7 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { loadConfig } from "../src/config.mjs";
 import { createStore } from "../src/core/store.mjs";
@@ -15,6 +16,7 @@ import { closeInterrupted, interruptedIn, quotaFromStatusline, sameQuota } from 
 import { readFrom, readSince } from "../src/core/transcript.mjs";
 import { usageFromTranscript } from "../src/core/usage.mjs";
 import { withRelevoTag } from "../src/core/relevo.mjs";
+import { launchTelemetryFlush } from "../src/core/telemetry-flush.mjs";
 
 const config = loadConfig();
 const CACHE_MS = 30_000;
@@ -57,6 +59,8 @@ try {
       const closed = closeInterrupted(session, Date.now(), usage, quotaFromStatusline(input, Date.now(), config.profile) ?? (await sessions.loadQuota(sessionId)));
       for (const ev of closed.events) await store.append(closed.runId, ev);
       await sessions.save(sessionId, closed.session);
+      // Cierre por Esc: también dispara la telemetría (desacoplada; desactivada, no hace nada).
+      launchTelemetryFlush({ config, script: fileURLToPath(new URL("./router.mjs", import.meta.url)) });
     }
   }
 

@@ -30,6 +30,22 @@ function browserIdFrom(env, key) {
   return v;
 }
 
+// Telemetría opt-in: activa solo con URL y token, y la URL ha de ser https (http solo hacia la propia máquina).
+// El token vive aquí y en nadie más: ni se imprime ni va a logs.
+function resolveTelemetry(env, home) {
+  const files = { sentFile: join(home, "telemetry-sent.json"), rejectedFile: join(home, "telemetry-rejected.json"), errorsFile: join(home, "telemetry-errors.log"), lockFile: join(home, "telemetry.lock") };
+  const off = { enabled: false, url: null, endpoint: null, token: null, ...files };
+  const rawUrl = (env.ROUTER_TELEMETRY_URL ?? "").trim();
+  const token = (env.ROUTER_TELEMETRY_TOKEN ?? "").trim();
+  if (!rawUrl || !token) return off;
+  let u;
+  try { u = new URL(rawUrl); } catch { return off; }
+  const local = LOCAL_HOSTS.has(u.hostname.replace(/^\[|\]$/g, ""));
+  if (!(u.protocol === "https:" || (u.protocol === "http:" && local))) return off;
+  const base = `${u.origin}${u.pathname.replace(/\/+$/, "")}`;
+  return { enabled: true, url: u.origin, endpoint: `${base}/v1/runs`, token, ...files };
+}
+
 function resolveProfiles(env, home, exists) {
   const defDir = join(home, ".claude");
   const legacyDir = join(home, LEGACY.dirName);
@@ -57,7 +73,8 @@ export const CONFIG_KEYS = Object.freeze([
   "ROUTER_SHADOW", "ROUTER_SHADOW_PROVIDER", "ROUTER_SHADOW_MODEL",
   "ROUTER_LAYA_URL", "ROUTER_LAYA_ROUTING", "ROUTER_LAYA_ROUTING_MODEL", "ROUTER_LAYA_EXTRA_MODELS", "ROUTER_LAYA_DOWNGRADE_THRESHOLD", "ROUTER_LAYA_TIMEOUT_MS", "ROUTER_LAYA_VENV", "ROUTER_LAYA_HF_HOME", "ROUTER_LAYA_PYTHON",
   "ROUTER_PROFILE_LABEL", "ROUTER_PROFILE2_DIR", "ROUTER_PROFILE2_LABEL", "ROUTER_PROFILE2_ALIAS", "ROUTER_PROFILE2_ARGS",
-  "ROUTER_PROFILE_BROWSER_ID", "ROUTER_PROFILE2_BROWSER_ID"
+  "ROUTER_PROFILE_BROWSER_ID", "ROUTER_PROFILE2_BROWSER_ID",
+  "ROUTER_TELEMETRY_URL", "ROUTER_TELEMETRY_TOKEN"
 ]);
 const KEY_SET = new Set(CONFIG_KEYS);
 const KEY_NAME = /^[A-Z0-9_]+$/;
@@ -185,6 +202,7 @@ export function loadConfig(processEnv = process.env, { exists = existsSync, read
     profileLabels,
     profiles,
     browser,
+    telemetry: resolveTelemetry(env, home),
     runsDir: join(home, "runs"),
     sessionsDir: join(home, "sessions"),
     pendingDir: join(home, "pendientes"),

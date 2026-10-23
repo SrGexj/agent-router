@@ -389,7 +389,8 @@ describe("agregados por perfil", () => {
 describe("etiquetas de entrenamiento: trainingLabel", () => {
   it("automática: lo que hizo Opus, solo en ejecuciones completadas", () => {
     expect(trainingLabel(full())).toEqual({ label: "programador", source: "auto" });
-    expect(trainingLabel(mkRun([]))).toEqual({ label: "opus", source: "auto" });
+    expect(trainingLabel(mkRun([task("consultor", "claude-opus-5-5", undefined)]))).toEqual({ label: "opus", source: "auto" });
+    expect(trainingLabel(mkRun([task("propio", "claude-opus-5-5", undefined, { agent: "Explore" })]))).toEqual({ label: "opus", source: "auto" });
     expect(trainingLabel(mkRun([], { status: "failed" }))).toBeNull();
     expect(trainingLabel(mkRun([], { status: "running" }))).toBeNull();
     expect(trainingLabel(null)).toBeNull();
@@ -399,6 +400,17 @@ describe("etiquetas de entrenamiento: trainingLabel", () => {
     expect(trainingLabel({ ...full(), routeLabel: fix })).toEqual({ label: "asistente", source: "usuario" });
     expect(trainingLabel(mkRun([], { status: "failed", routeLabel: fix }))).toEqual({ label: "asistente", source: "usuario" });
     expect(trainingLabel({ ...full(), routeLabel: null })).toEqual({ label: "programador", source: "auto" });
+  });
+});
+
+describe("trainingLabel: ejecuciones sin ningún subagente", () => {
+  it("se excluyen (ruido: Opus lo hizo todo sin delegar), aunque actualRoute siga diciendo opus", () => {
+    expect(trainingLabel(mkRun([]))).toBeNull();
+    expect(trainingLabel({ ...mkRun([]), taskOrder: undefined, tasks: undefined })).toBeNull();
+    expect(actualRoute(mkRun([]))).toBe("opus");
+  });
+  it("con corrección manual del usuario se incluyen", () => {
+    expect(trainingLabel(mkRun([], { routeLabel: { label: "opus", t: 1 } }))).toEqual({ label: "opus", source: "usuario" });
   });
 });
 
@@ -421,7 +433,8 @@ describe("trainingSummary", () => {
   it("cuenta etiquetas, corregidas y reparto por clase", () => {
     const runs = [
       full(), // programador auto
-      mkRun([]), // opus auto
+      mkRun([task("consultor", "claude-opus-5-5", undefined)]), // opus auto
+      mkRun([]), // sin subagentes: fuera
       { ...full(), routeLabel: { label: "asistente", t: 1 } }, // asistente usuario
       mkRun([], { status: "failed" }), // sin etiqueta
       mkRun([], { status: "running" })
@@ -496,7 +509,8 @@ describe("modo sombra: solo cuenta el clasificador actual", () => {
     expect(aggregateShadow([]).others).toEqual([]);
   });
   it("el contador de entrenamiento no depende del clasificador", () => {
-    expect(aggregateShadow(runs).training.n).toBe(runs.length);
+    const labelled = runs.map((r) => ({ ...r, routeLabel: { label: "opus", t: 1 } })); // sin subagentes solo cuentan las corregidas
+    expect(aggregateShadow(labelled).training.n).toBe(runs.length);
   });
   it("por perfil también", () => {
     const by = aggregateShadowByProfile(runs.map((r) => ({ ...r, profile: "trabajo" })));

@@ -39,16 +39,38 @@ export function parseLocalSeeds(text) {
   return out;
 }
 
-// Añade las semillas versionadas (src/core/laya-seeds.mjs) y las locales a las filas de entrenamiento, sin repetir textos.
-export function withSeeds(rows, local = []) {
-  const seen = new Set((rows ?? []).map((r) => r.text));
+// Clave de comparación de textos: sin mayúsculas ni espacios sobrantes.
+const textKey = (t) => String(t ?? "").trim().replace(/\s+/g, " ").toLowerCase();
+
+// Añade las semillas versionadas (src/core/laya-seeds.mjs) y las locales a las filas de entrenamiento, sin repetir textos
+// ni meter ninguna cuyo texto esté ya en la evaluación (evalRows).
+export function withSeeds(rows, local = [], evalRows = []) {
+  const seen = new Set([...(rows ?? []), ...(evalRows ?? [])].map((r) => textKey(r.text)));
   const extra = [];
   for (const s of [...SEEDS, ...local]) {
-    if (seen.has(s.text)) continue;
-    seen.add(s.text);
+    const k = textKey(s.text);
+    if (seen.has(k)) continue;
+    seen.add(k);
     extra.push({ ...s, source: "semilla" });
   }
   return [...(rows ?? []), ...extra];
+}
+
+export const SEED_EVAL_RATIO = 0.25;
+
+// Reparte las semillas (versionadas + locales) entre train y eval según el hash del texto normalizado (~75/25, determinista).
+// Sin repetir textos de filas reales de ningún lado. Devuelve ambos conjuntos con las filas reales incluidas.
+export function addSeeds(trainRows, evalRows, local = [], ratio = SEED_EVAL_RATIO) {
+  const seen = new Set([...(trainRows ?? []), ...(evalRows ?? [])].map((r) => textKey(r.text)));
+  const train = [...(trainRows ?? [])];
+  const ev = [...(evalRows ?? [])];
+  for (const s of [...SEEDS, ...local]) {
+    const k = textKey(s.text);
+    if (seen.has(k)) continue;
+    seen.add(k);
+    (inEvalSet(k, ratio) ? ev : train).push({ ...s, source: "semilla" });
+  }
+  return { train, eval: ev };
 }
 
 export function csvField(value) {
@@ -61,16 +83,16 @@ export function toCsv(rows) {
   return `${[CSV_HEADER, ...lines].join("\n")}\n`;
 }
 
-// Pertenece al conjunto de evaluación según un hash del runId: no cambia al llegar ejecuciones nuevas.
-export function inEvalSet(runId, ratio = DEFAULT_EVAL_RATIO) {
-  const h = createHash("sha256").update(String(runId)).digest().readUInt32BE(0) / 2 ** 32;
+// Pertenece al conjunto de evaluación según un hash de la clave (el texto normalizado en splitRows): no cambia al llegar ejecuciones nuevas.
+export function inEvalSet(key, ratio = DEFAULT_EVAL_RATIO) {
+  const h = createHash("sha256").update(String(key)).digest().readUInt32BE(0) / 2 ** 32;
   return h < ratio;
 }
 
 export function splitRows(rows, ratio = DEFAULT_EVAL_RATIO) {
   const train = [];
   const ev = [];
-  for (const r of rows ?? []) (inEvalSet(r.runId, ratio) ? ev : train).push(r);
+  for (const r of rows ?? []) (inEvalSet(r.text != null ? textKey(r.text) : r.runId, ratio) ? ev : train).push(r);
   return { train, eval: ev };
 }
 

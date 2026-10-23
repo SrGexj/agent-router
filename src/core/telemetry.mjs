@@ -6,10 +6,12 @@ import { addUsage, emptyUsage } from "./pricing.mjs";
 
 // Claves exactas de cada nivel del documento (el servicio rechaza cualquier otra).
 export const TELEMETRY_KEYS = Object.freeze({
-  run: ["schema", "runId", "rev", "profile", "mode", "orchestratorModel", "status", "exitCode", "startedAt", "endedAt", "durationMs", "quotaStart", "quotaEnd", "orchestratorUsage", "directEdits", "errorKinds", "tasks"],
+  run: ["schema", "runId", "rev", "profile", "mode", "orchestratorModel", "status", "exitCode", "startedAt", "endedAt", "durationMs", "quotaStart", "quotaEnd", "orchestratorUsage", "directEdits", "errorKinds", "tasks", "laya"],
   quota: ["fiveHourPct", "fiveHourResetsAt", "sevenDayPct", "sevenDayResetsAt"],
   errorKinds: ["limit", "api", "permission"],
   task: ["idx", "agent", "model", "status", "durationMs", "toolUses", "attempt", "usage"],
+  laya: ["model", "decisions", "errors", "errorsByKind", "applied", "latencyP50Ms", "latencyP90Ms"],
+  layaErrorKinds: ["timeout", "connection", "http", "parse", "unknown"],
   usage: ["model", "input", "output", "cacheRead", "cacheWrite5m", "cacheWrite1h"]
 });
 
@@ -74,6 +76,46 @@ function orchestratorModel(run, end) {
   return null;
 }
 
+const MAX_COUNT = 100000;
+const MAX_LATENCY_MS = 60000;
+const LAYA_ERROR_KINDS = new Set(["timeout", "connection", "http", "parse"]);
+
+// Percentil por rango más cercano sobre una lista ya ordenada.
+const percentile = (sorted, p) => sorted[Math.max(0, Math.ceil(sorted.length * p) - 1)];
+
+// Resumen por run de los laya_decision: solo contadores y latencias; undefined si no hubo ninguno.
+function layaSummary(events) {
+  const ds = events.filter((e) => e.type === "laya_decision");
+  if (!ds.length) return undefined;
+  const byKind = { timeout: 0, connection: 0, http: 0, parse: 0, unknown: 0 };
+  const models = new Map();
+  const latencies = [];
+  let errors = 0;
+  let applied = 0;
+  for (const e of ds) {
+    if (e.error) {
+      errors += 1;
+      byKind[LAYA_ERROR_KINDS.has(e.errorKind) ? e.errorKind : "unknown"] += 1;
+    }
+    if (e.applied === true) applied += 1;
+    const m = cleanModel(e.layaModel);
+    if (m) models.set(m, (models.get(m) ?? 0) + 1);
+    if (typeof e.latencyMs === "number" && Number.isFinite(e.latencyMs)) latencies.push(Math.min(MAX_LATENCY_MS, Math.max(0, Math.round(e.latencyMs))));
+  }
+  latencies.sort((a, b) => a - b);
+  const cap = (n) => Math.min(MAX_COUNT, n);
+  const top = [...models].sort((a, b) => b[1] - a[1])[0];
+  return {
+    model: top ? top[0] : null,
+    decisions: cap(ds.length),
+    errors: cap(errors),
+    errorsByKind: Object.fromEntries(Object.entries(byKind).map(([k, v]) => [k, cap(v)])),
+    applied: cap(applied),
+    latencyP50Ms: latencies.length ? percentile(latencies, 0.5) : null,
+    latencyP90Ms: latencies.length ? percentile(latencies, 0.9) : null
+  };
+}
+
 function taskDoc(t, idx) {
   const status = TASK_STATUS.has(t.status) ? t.status : null;
   const measured = t.endedAt != null && t.startedAt != null ? t.endedAt - t.startedAt : null;
@@ -116,5 +158,7 @@ export function buildTelemetry(events, { profile, rev } = {}) {
     errorKinds: kinds,
     tasks: run.taskOrder.slice(0, MAX_TASKS).map((id, i) => taskDoc(run.tasks[id], i + 1))
   };
+  const laya = layaSummary(events);
+  if (laya) doc.laya = laya;
   return doc;
 }

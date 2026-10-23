@@ -39,6 +39,19 @@ const task = z.strictObject({
   usage: usageList.nullable()
 });
 
+// Resumen opcional de decisiones de Laya: solo métricas.
+const layaCount = z.number().int().min(0).max(100000);
+const layaLatency = z.number().int().min(0).max(60000).nullable();
+const laya = z.strictObject({
+  model: label.nullable(),
+  decisions: layaCount,
+  errors: layaCount,
+  errorsByKind: z.strictObject({ timeout: layaCount, connection: layaCount, http: layaCount, parse: layaCount, unknown: layaCount }),
+  applied: layaCount,
+  latencyP50Ms: layaLatency,
+  latencyP90Ms: layaLatency
+});
+
 export const runSchema = z.strictObject({
   schema: z.literal(1),
   runId,
@@ -56,6 +69,7 @@ export const runSchema = z.strictObject({
   orchestratorUsage: usageList.nullable(),
   directEdits: nat,
   errorKinds: z.strictObject({ limit: nat, api: nat, permission: nat }),
+  laya: laya.optional(),
   tasks: z.array(task).max(500).refine((a) => new Set(a.map((t) => t.idx)).size === a.length, "idx repetido")
 });
 

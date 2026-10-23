@@ -45,7 +45,8 @@ describe("buildTelemetry: lista blanca", () => {
 
   it("las claves son EXACTAMENTE la lista blanca, en cada nivel", () => {
     const d = build();
-    expect(Object.keys(d).sort()).toEqual([...TELEMETRY_KEYS.run].sort());
+    expect(Object.keys(d).sort()).toEqual(TELEMETRY_KEYS.run.filter((k) => k !== "laya").sort());
+    expect(TELEMETRY_KEYS.run).toContain("laya");
     expect(Object.keys(d.quotaStart).sort()).toEqual([...TELEMETRY_KEYS.quota].sort());
     expect(Object.keys(d.errorKinds).sort()).toEqual([...TELEMETRY_KEYS.errorKinds].sort());
     for (const t of d.tasks) expect(Object.keys(t).sort()).toEqual([...TELEMETRY_KEYS.task].sort());
@@ -260,5 +261,70 @@ describe("buildTelemetry: contrato del servicio", () => {
 
   it("el esquema rechaza un campo desconocido (el contrato es estricto de verdad)", () => {
     expect(runSchema.safeParse({ ...build(), task: "x" }).success).toBe(false);
+  });
+});
+
+const layaEv = (o = {}) => ({ type: "laya_decision", toolUseId: `${S}-tu`, requested: "programador", choice: "asistente", confidence: 0.97, latencyMs: 100, mode: "downgrade", applied: false, layaModel: "laya-1", t: T0 + 45, ...o });
+const withLaya = (...evs) => { const e = fixture(); e.splice(8, 0, ...evs); return e; };
+
+describe("buildTelemetry: resumen de Laya", () => {
+  it("sin eventos laya_decision no hay campo laya", () => {
+    expect("laya" in build()).toBe(false);
+  });
+
+  it("cuenta decisiones, aplicadas y errores por tipo", () => {
+    const d = build(withLaya(
+      layaEv({ applied: true }),
+      layaEv({ applied: true }),
+      layaEv({ error: `${S} boom`, errorKind: "timeout", choice: null, confidence: null }),
+      layaEv({ error: "x", errorKind: "http" }),
+      layaEv({ error: "y", errorKind: "http" }),
+      layaEv({ error: "z", errorKind: "raro" }),
+      layaEv({ error: "w" })
+    ));
+    expect(d.laya.decisions).toBe(7);
+    expect(d.laya.applied).toBe(2);
+    expect(d.laya.errors).toBe(5);
+    expect(d.laya.errorsByKind).toEqual({ timeout: 1, connection: 0, http: 2, parse: 0, unknown: 2 });
+  });
+
+  it("modelo: el más frecuente y válido; null si ninguno encaja", () => {
+    expect(build(withLaya(layaEv({ layaModel: "a-1" }), layaEv({ layaModel: "b-2" }), layaEv({ layaModel: "b-2" }))).laya.model).toBe("b-2");
+    expect(build(withLaya(layaEv({ layaModel: "mal modelo!" }), layaEv({ layaModel: undefined }))).laya.model).toBeNull();
+  });
+
+  it("percentiles p50/p90 sobre latencias numéricas, redondeadas y recortadas", () => {
+    const lat = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100.4].map((latencyMs) => layaEv({ latencyMs }));
+    const d = build(withLaya(...lat, layaEv({ latencyMs: null }), layaEv({ latencyMs: undefined })));
+    expect(d.laya.latencyP50Ms).toBe(50);
+    expect(d.laya.latencyP90Ms).toBe(90);
+    const big = build(withLaya(layaEv({ latencyMs: 999999 })));
+    expect(big.laya.latencyP50Ms).toBe(60000);
+  });
+
+  it("sin latencias: percentiles null", () => {
+    const d = build(withLaya(layaEv({ latencyMs: undefined })));
+    expect(d.laya.latencyP50Ms).toBeNull();
+    expect(d.laya.latencyP90Ms).toBeNull();
+  });
+
+  it("claves exactas del bloque laya", () => {
+    const d = build(withLaya(layaEv()));
+    expect(Object.keys(d.laya).sort()).toEqual([...TELEMETRY_KEYS.laya].sort());
+    expect(Object.keys(d.laya.errorsByKind).sort()).toEqual([...TELEMETRY_KEYS.layaErrorKinds].sort());
+  });
+
+  it("SENTINELA: choice, confidence, requested, toolUseId y errores no se filtran", () => {
+    const d = build(withLaya(layaEv({ choice: `${S}-choice`, requested: `${S}-req`, confidence: 0.123456, error: `${S} msg`, errorKind: `${S}-kind`, layaModel: `${S} modelo` })));
+    const json = JSON.stringify(d.laya);
+    expect(json).not.toContain(S);
+    expect(json).not.toContain("0.1234");
+    expect(JSON.stringify(build(withLaya(layaEv())))).not.toContain(S);
+  });
+
+  it("el documento con laya valida contra el esquema del servicio", () => {
+    const d = build(withLaya(layaEv({ applied: true }), layaEv({ error: "e", errorKind: "parse", latencyMs: 700 })));
+    expect(runSchema.safeParse(d).success).toBe(true);
+    expect(runSchema.safeParse({ ...d, laya: { ...d.laya, extra: 1 } }).success).toBe(false);
   });
 });

@@ -134,6 +134,7 @@ Al cerrarse un run (hook de `co`/`cop`, cierre con Esc o `router` headless) se l
 - Cuota al empezar y al acabar: porcentaje de 5 h y de 7 d (0 a 100) y su momento de reinicio.
 - Tokens por modelo del orquestador y de cada encargo (entrada, salida, caché).
 - Ediciones directas del orquestador y recuento de errores por tipo (`limit`, `api`, `permission`).
+- Resumen de Laya por run (solo si hubo decisiones, campo `laya`): modelo de Laya más frecuente, nº de decisiones, errores (total y por tipo: `timeout`, `connection`, `http`, `parse`, `unknown`), nº de aplicadas y latencia p50/p90 en ms. Nunca la elección, la confianza, la petición ni el texto de los errores.
 - Por encargo: número de orden, agente, modelo, estado, duración, usos de herramientas e intento.
 - Tareas sin inicio registrado: si un subagente gasta tokens en un run donde no consta su arranque (por ejemplo, lo arrancó un run anterior de la misma sesión y se reanudó en este), el gasto se cuenta igualmente como una tarea más con `agent` y `status` a `null` y su modelo y tokens. El dashboard no las muestra; solo afectan al documento de telemetría.
 

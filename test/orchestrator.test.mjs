@@ -61,6 +61,21 @@ describe("buildOrchestratorPrompt", () => {
     expect(regla.length).toBeLessThan(400);
   });
 
+  it("sin browser no hay sección Navegador; con id la añade", () => {
+    const base = buildOrchestratorPrompt({ agents, quota: null, now: NOW_MS });
+    expect(base).not.toContain("## Navegador");
+    expect(buildOrchestratorPrompt({ agents, quota: null, now: NOW_MS, browser: null })).toBe(base);
+    expect(buildOrchestratorPrompt({ agents, quota: null, now: NOW_MS, browser: { label: "x" } })).toBe(base);
+    const id = "11111111-2222-3333-4444-555555555555";
+    const p = buildOrchestratorPrompt({ agents, quota: null, now: NOW_MS, browser: { id, label: "Trabajo" } });
+    expect(p).toContain("## Navegador");
+    expect(p).toContain("Trabajo");
+    expect(p).toContain(`select_browser`);
+    expect(p).toContain(id);
+    expect(p).toMatch(/mcp__claude-in-chrome__/);
+    expect(p).toMatch(/asistente/);
+  });
+
   it("refleja el reparto Opus/Sonnet/Haiku y la excepción de una línea", () => {
     const p = buildOrchestratorPrompt({ agents, quota: null, now: NOW_MS });
     expect(p).toMatch(/asistente \(Haiku\).*web.*navegador/s);

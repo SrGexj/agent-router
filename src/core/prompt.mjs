@@ -41,7 +41,15 @@ function quotaSection(quota, now) {
   return `${line}\nPresión baja: reparte con el criterio normal.`;
 }
 
-export function buildOrchestratorPrompt({ agents, quota, now }) {
+function browserSection(browser) {
+  if (!browser?.id) return "";
+  return `## Navegador
+Perfil de Chrome: ${browser.label}. Antes de usar cualquier herramienta mcp__claude-in-chrome__*, llama a select_browser con deviceId "${browser.id}" (una vez por sesión) y nunca elijas otro navegador por tu cuenta. Los encargos de navegador van al asistente: incluye ese mismo deviceId en el encargo para que lo seleccione él también.
+
+`;
+}
+
+export function buildOrchestratorPrompt({ agents, quota, now, browser = null }) {
   const roster = Object.entries(agents ?? {})
     .map(([name, a]) => `- subagent_type: "${name}" — ${a.description}`)
     .join("\n");
@@ -63,6 +71,6 @@ ${roster || "- (no hay subagentes definidos: haz la tarea tú)"}
 7. El resumen de lo hecho no va al chat: va al archivo de relevo cuando salte el aviso o cuando el usuario cierre la tarea (hecho, pendiente, decisiones). Al usuario, solo lo pendiente o las dudas, en el estilo de su CLAUDE.md (p. ej. caveman), también al relatar informes de subagentes.
 8. Para escribir en la memoria (archivos .md de la carpeta memory) usa las herramientas Edit o Write, nunca con Bash (cat >>, echo >, sed -i): con Bash cada escritura pide permiso al usuario.
 
-## ${quotaSection(quota, now)}
+${browserSection(browser)}## ${quotaSection(quota, now)}
 `;
 }

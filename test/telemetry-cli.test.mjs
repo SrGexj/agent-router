@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
-import { mkdtemp, rm, readdir, readFile, writeFile, chmod, mkdir } from "node:fs/promises";
+import { mkdtemp, rm, readdir, readFile, writeFile, chmod, mkdir, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -26,7 +26,20 @@ beforeEach(async () => {
   });
   await new Promise((r) => server.listen(0, "127.0.0.1", r));
 });
-afterEach(async () => { await new Promise((r) => server.close(r)); await rm(home, { recursive: true, force: true }); });
+// El hijo `telemetry flush` va desacoplado (detached, sin handle): sigue escribiendo (sent.json, lock) tras responder el servidor.
+// Su lock existe mientras trabaja, así que se espera a que desaparezca antes de borrar el directorio temporal.
+const waitFlushIdle = async () => {
+  const lock = join(home, ".agent-router", "telemetry.lock");
+  for (let i = 0; i < 200; i++) {
+    if (!(await stat(lock).then(() => true, () => false))) return;
+    await new Promise((r) => setTimeout(r, 25));
+  }
+};
+afterEach(async () => {
+  await new Promise((r) => server.close(r));
+  await waitFlushIdle();
+  await rm(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+});
 
 const baseEnv = (extra = {}) => {
   const env = { ...process.env, HOME: home, ROUTER_HOME: join(home, ".agent-router"), ...extra };

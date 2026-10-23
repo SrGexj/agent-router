@@ -39,11 +39,11 @@ function terminalLine(ev, names) {
   }
 }
 
-export async function runTask({ task, mode, model, effort = null, agents = null, config, store, spawn, now, out, cwd = undefined, runId, signal = undefined, profile = "trabajo" }) {
+export async function runTask({ task, mode, model, effort = null, agents = null, config, store, spawn, now, out, cwd = undefined, runId, signal = undefined, profile = "trabajo", browser = null }) {
   const quota = mode === "orquestado" ? await store.latestQuota(profile) : null;
   // Cuota conocida al empezar (cualquier modo): referencia para medir cuánto gasta el run.
   const startQuota = quotaSnapshot(mode === "orquestado" ? quota : await store.latestQuota(profile));
-  const systemPrompt = mode === "orquestado" ? buildOrchestratorPrompt({ agents, quota, now: now() }) : null;
+  const systemPrompt = mode === "orquestado" ? buildOrchestratorPrompt({ agents, quota, now: now(), browser }) : null;
   const args = buildClaudeArgs({ mode, model, systemPrompt, agents, config, effort });
 
   const writes = [];

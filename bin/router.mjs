@@ -44,7 +44,7 @@ const store = createStore({ runsDir: config.runsDir });
 
 if (opts.printPrompt) {
   const agents = await loadAgents(AGENTS_DIR);
-  process.stdout.write(buildOrchestratorPrompt({ agents, quota: await store.latestQuota(config.profile), now: Date.now() }));
+  process.stdout.write(buildOrchestratorPrompt({ agents, quota: await store.latestQuota(config.profile), now: Date.now(), browser: config.browser }));
   process.exit(0);
 }
 const mode = opts.model ? "manual" : "orquestado";
@@ -58,7 +58,7 @@ process.on("SIGINT", () => ac.abort());
 console.error(`[router] ${mode === "orquestado" ? "Opus orquesta" : `manual → ${model}`} · ${runId}`);
 
 const res = await runTask({
-  task: opts.task, mode, model, effort: opts.effort, agents, config, store, profile: config.profile,
+  task: opts.task, mode, model, effort: opts.effort, agents, config, store, profile: config.profile, browser: config.browser,
   spawn, now: Date.now, out: process.stdout, cwd: process.cwd(), runId, signal: ac.signal
 });
 

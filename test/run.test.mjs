@@ -132,6 +132,17 @@ describe("runTask", () => {
     expect(sys).toContain("5 h: 80 %");
   });
 
+  it("mete el navegador del perfil en el prompt, y no en modo manual", async () => {
+    const store = createStore({ runsDir: dir });
+    const browser = { id: "11111111-2222-3333-4444-555555555555", label: "Trabajo" };
+    const a = fakeSpawn();
+    await runTask({ task: "x", mode: "orquestado", model: "opus", agents, config, store, spawn: a.spawn, now, out: sink(), runId: "r2b", browser });
+    expect(a.calls[0].args[a.calls[0].args.indexOf("--append-system-prompt") + 1]).toContain(browser.id);
+    const b = fakeSpawn();
+    await runTask({ task: "x", mode: "orquestado", model: "opus", agents, config, store, spawn: b.spawn, now, out: sink(), runId: "r2c" });
+    expect(b.calls[0].args[b.calls[0].args.indexOf("--append-system-prompt") + 1]).not.toContain("## Navegador");
+  });
+
   it("modo manual: sin prompt de orquestador", async () => {
     const store = createStore({ runsDir: dir });
     const { spawn, calls } = fakeSpawn();

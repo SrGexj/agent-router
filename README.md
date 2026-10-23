@@ -172,6 +172,8 @@ Solo `src/config.mjs` lee variables de entorno. El resto del código recibe la c
 | `ROUTER_PROFILE2_LABEL` | derivada de la carpeta (`~/.claude-X` → `X`) | Etiqueta del segundo perfil. |
 | `ROUTER_PROFILE2_ALIAS` | `cop` | Nombre del alias del segundo perfil. Letras, números, `-` y `_`; distinto de `co`. |
 | `ROUTER_PROFILE2_ARGS` | vacío | Argumentos extra para `claude` en ese perfil (por ejemplo, canales). |
+| `ROUTER_PROFILE_BROWSER_ID` | sin definir | `deviceId` (UUID) del navegador de Claude in Chrome del perfil principal. Si se define, el prompt del orquestador le manda ejecutar `select_browser` con ese id antes de usar el navegador. |
+| `ROUTER_PROFILE2_BROWSER_ID` | sin definir | Lo mismo para el segundo perfil (`cop`). Cada perfil usa solo su id. |
 
 ### Dónde se definen
 

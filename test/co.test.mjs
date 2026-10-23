@@ -1,3 +1,5 @@
+import { servicePlist } from "../src/core/platform/darwin.mjs";
+import { buildLayaRequest } from "../src/core/classifier.mjs";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { spawn } from "node:child_process";
 import { mkdtemp, rm, readdir, readFile, writeFile, mkdir, appendFile } from "node:fs/promises";
@@ -5,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createSessions } from "../src/core/sessions.mjs";
-import { buildCoSettings, coFunction, withZshBlock, withoutZshBlock, launchAgentPlist, layaLaunchAgentPlist, layaInstallPlan, layaServiceSpec, planStatuslineChain, serverServiceSpec, pickPython, parsePythonVersion, LAYA_VERSION, ZSH_START } from "../src/core/install.mjs";
+import { buildCoSettings, coFunction, withZshBlock, withoutZshBlock, launchAgentPlist, layaLaunchAgentPlist, layaInstallPlan, layaServiceSpec, layaWarmSpec, planStatuslineChain, serverServiceSpec, pickPython, parsePythonVersion, LAYA_VERSION, ZSH_START } from "../src/core/install.mjs";
 import { systemdUnit } from "../src/core/platform/linux.mjs";
 import { loadConfig } from "../src/config.mjs";
 import { parseCliArgs } from "../src/core/cli.mjs";
@@ -267,6 +269,19 @@ describe("especificación de servicios", () => {
     expect(s).toMatchObject({ argv: ["/v/bin/laya-serve"], logFile: "/h/laya.log" });
     expect(s.env).toMatchObject({ LAYA_HOST: "127.0.0.1", LAYA_PORT: "4318", HF_HOME: "/h/hf" });
     expect(s.env).not.toHaveProperty("LAYA_EXTRA_MODELS");
+  });
+  it("Laya warm-up: curl POST mínimo y válido al endpoint, cada 45 s, sin KeepAlive", () => {
+    const s = layaWarmSpec({ label: "com.x.laya-warm", home: "/h", url: "http://127.0.0.1:4318/v1/systemone", model: "encargos" });
+    expect(s).toMatchObject({ label: "com.x.laya-warm", startInterval: 45, logFile: "/h/laya-warm.log" });
+    expect(s.argv[0]).toBe("/usr/bin/curl");
+    expect(s.argv).toContain("http://127.0.0.1:4318/v1/systemone");
+    const body = JSON.parse(s.argv[s.argv.indexOf("-d") + 1]);
+    expect(body).toEqual(buildLayaRequest("calentamiento", "encargos"));
+    const plist = servicePlist(s);
+    expect(plist).toContain("<key>StartInterval</key><integer>45</integer>");
+    expect(plist).not.toContain("KeepAlive");
+    expect(plist).toContain("<key>RunAtLoad</key><true/>");
+    expect(servicePlist(layaServiceSpec({ label: "l", serveBin: "/b", home: "/h", host: "h", port: 1 }))).toContain("KeepAlive");
   });
   it("Laya: LAYA_EXTRA_MODELS desde la config, en el plist (darwin) y en la unidad (linux)", () => {
     const extraModels = { encargos: "/m/modelo" };

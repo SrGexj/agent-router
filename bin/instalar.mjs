@@ -10,14 +10,16 @@ import { copyFile, mkdir, readFile, rename, symlink, unlink, writeFile } from "n
 import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadConfig, saveConfigEnv } from "../src/config.mjs";
-import { buildCoSettings, planStatuslineChain, layaInstallPlan, layaServiceSpec, pickPython, serverServiceSpec, withZshBlock as withShellBlock, withoutZshBlock as withoutShellBlock } from "../src/core/install.mjs";
+import { buildCoSettings, planStatuslineChain, layaInstallPlan, layaServiceSpec, layaWarmSpec, pickPython, serverServiceSpec, withZshBlock as withShellBlock, withoutZshBlock as withoutShellBlock } from "../src/core/install.mjs";
 import { appPaths, appRootFor, planAppRemove, planLink } from "../src/core/app-copy.mjs";
+import { LAYA_MODEL } from "../src/core/classifier.mjs";
 import { syncApp } from "../src/core/app-sync.mjs";
 import { realDeps, selectPlatform } from "../src/core/platform/index.mjs";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url)).replace(/\/$/, "");
 const LABEL = "com.agent-router.server";
 const LAYA_LABEL = "com.agent-router.laya";
+const LAYA_WARM_LABEL = "com.agent-router.laya-warm";
 const LAYA_HOST = "127.0.0.1";
 const LAYA_PORT = 4318;
 const config = loadConfig();
@@ -120,6 +122,11 @@ async function installLaya() {
       if (r.status !== 0) return log(`Laya OMITIDO: falló ${cmd} ${args[0]} (${(r.stderr || r.error?.message || "").trim().split("\n").pop()})`);
     }
     const res = await platform.serviceInstall(layaServiceSpec({ label: LAYA_LABEL, serveBin: join(paths.layaVenv, "bin/laya-serve"), home: config.home, host: LAYA_HOST, port: LAYA_PORT, extraModels: config.layaExtraModels }));
+    if (res.ok && platform.name === "darwin") {
+      // Calentamiento periódico (launchd StartInterval): idempotente, serviceInstall reescribe y recarga el plist.
+      const warm = await platform.serviceInstall(layaWarmSpec({ label: LAYA_WARM_LABEL, home: config.home, url: config.shadow.layaUrl, model: config.layaRoutingModel || LAYA_MODEL }));
+      log(warm.ok ? "calentamiento de Laya cada 45 s (com.agent-router.laya-warm)" : `calentamiento de Laya OMITIDO: ${warm.error}`);
+    }
     log(res.ok ? `Laya activo en http://${LAYA_HOST}:${LAYA_PORT} (solo local; log en ${config.home}/laya.log; el modo sombra queda activado)` : `Laya OMITIDO: no se pudo cargar el servicio: ${res.error}`);
   } catch (e) { log(`Laya OMITIDO: ${e.message}`); }
 }
@@ -190,6 +197,7 @@ async function remove() {
     }
   }
   if ((await platform.serviceUninstall(LABEL)).removed) log("servicio del dashboard quitado");
+  if ((await platform.serviceUninstall(LAYA_WARM_LABEL)).removed) log("calentamiento de Laya quitado");
   if ((await platform.serviceUninstall(LAYA_LABEL)).removed) log("servicio de Laya quitado (el venv y los pesos se quedan: borra a mano ~/.agent-router/laya-venv y ~/.agent-router/hf si no los quieres)");
   for (const a of paths.agents) await unlinkIfMine(a.link, [a.target, ...a.legacy]);
   await unlinkIfMine(paths.routerBin, [appFiles.router, ...legacyRouter]);

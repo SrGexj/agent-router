@@ -72,6 +72,18 @@ describe("routeAgent", () => {
     expect(out.output).toBeNull();
     expect(out.event).toMatchObject({ type: "laya_decision", choice: null, confidence: null, applied: false, error: "laya no disponible" });
   });
+  it("evento: layaModel del clasificador y errorKind del error", async () => {
+    const ok = await routeAgent({ payload: pre(input), mode: "shadow", classifier: { model: "encargos", classify: async () => ({ choice: "asistente", confidence: 0.5, latencyMs: 3 }) }, now: () => 1 });
+    expect(ok.event).toMatchObject({ layaModel: "encargos" });
+    expect(ok.event).not.toHaveProperty("errorKind");
+    const err = Object.assign(new Error("laya no disponible"), { errorKind: "connection" });
+    const bad = await routeAgent({ payload: pre(input), mode: "shadow", classifier: { model: "encargos", classify: async () => { throw err; } }, now: () => 1 });
+    expect(bad.event).toMatchObject({ layaModel: "encargos", error: "laya no disponible", errorKind: "connection" });
+  });
+  it("timeout exterior sin clasificar: errorKind timeout", async () => {
+    const out = await routeAgent({ payload: pre(input), mode: "shadow", classifier: { classify: () => new Promise(() => {}) }, timeoutMs: 20, now: () => 1 });
+    expect(out.event).toMatchObject({ error: "timeout", errorKind: "timeout" });
+  });
   it("timeout: Promise.race corta aunque el clasificador no responda", async () => {
     const classifier = { classify: () => new Promise(() => {}) };
     const out = await routeAgent({ payload: pre(input), mode: "downgrade", threshold: 0.9, classifier, timeoutMs: 20, now: () => 1 });
@@ -116,7 +128,7 @@ describe("config layaRouting", () => {
   const cfg = (env) => loadConfig({ HOME: "/h", ...env }, { exists: () => false, readFile: () => { throw Object.assign(new Error(), { code: "ENOENT" }); } });
   it("por defecto off, 0.9 y 300 ms", () => {
     const c = cfg({});
-    expect([c.layaRouting, c.layaDowngradeThreshold, c.layaTimeoutMs]).toEqual(["off", 0.9, 300]);
+    expect([c.layaRouting, c.layaDowngradeThreshold, c.layaTimeoutMs]).toEqual(["off", 0.9, 1000]);
   });
   it("lee el entorno", () => {
     const c = cfg({ ROUTER_LAYA_ROUTING: "shadow", ROUTER_LAYA_DOWNGRADE_THRESHOLD: "0.95", ROUTER_LAYA_TIMEOUT_MS: "500" });
@@ -124,6 +136,6 @@ describe("config layaRouting", () => {
   });
   it("valores no válidos", () => {
     expect(() => cfg({ ROUTER_LAYA_ROUTING: "raro" })).toThrow(/ROUTER_LAYA_ROUTING/);
-    expect(cfg({ ROUTER_LAYA_DOWNGRADE_THRESHOLD: "2", ROUTER_LAYA_TIMEOUT_MS: "x" })).toMatchObject({ layaDowngradeThreshold: 0.9, layaTimeoutMs: 300 });
+    expect(cfg({ ROUTER_LAYA_DOWNGRADE_THRESHOLD: "2", ROUTER_LAYA_TIMEOUT_MS: "x" })).toMatchObject({ layaDowngradeThreshold: 0.9, layaTimeoutMs: 1000 });
   });
 });

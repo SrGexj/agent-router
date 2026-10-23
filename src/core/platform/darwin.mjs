@@ -4,8 +4,8 @@ import { shellBlockFor } from "./shell.mjs";
 
 const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
-// spec: { label, argv: [bin, ...args], cwd?, env?, logFile }. Función pura.
-export function servicePlist({ label, argv, cwd = null, env = {}, logFile }) {
+// spec: { label, argv: [bin, ...args], cwd?, env?, logFile, startInterval? (s: tarea periódica, sin KeepAlive) }. Función pura.
+export function servicePlist({ label, argv, cwd = null, env = {}, logFile, startInterval = null }) {
   const vars = Object.entries(env).map(([k, v]) => `<key>${esc(k)}</key><string>${esc(v)}</string>`).join("");
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -19,7 +19,7 @@ ${argv.map((a) => `    <string>${esc(a)}</string>`).join("\n")}
 ${cwd ? `  <key>WorkingDirectory</key><string>${esc(cwd)}</string>\n` : ""}  <key>EnvironmentVariables</key>
   <dict>${vars}</dict>
   <key>RunAtLoad</key><true/>
-  <key>KeepAlive</key><true/>
+${startInterval ? `  <key>StartInterval</key><integer>${Number(startInterval)}</integer>` : "  <key>KeepAlive</key><true/>"}
   <key>StandardOutPath</key><string>${esc(logFile)}</string>
   <key>StandardErrorPath</key><string>${esc(logFile)}</string>
 </dict>

@@ -225,7 +225,7 @@ export function loadConfig(processEnv = process.env, { exists = existsSync, read
     // Checkpoints extra que el instalador pasa a laya-serve (LAYA_EXTRA_MODELS).
     layaExtraModels,
     layaDowngradeThreshold: env.ROUTER_LAYA_DOWNGRADE_THRESHOLD && thr > 0 && thr <= 1 ? thr : 0.9,
-    layaTimeoutMs: env.ROUTER_LAYA_TIMEOUT_MS && Number.isInteger(tmo) && tmo > 0 ? tmo : 300,
+    layaTimeoutMs: env.ROUTER_LAYA_TIMEOUT_MS && Number.isInteger(tmo) && tmo > 0 ? tmo : 1000,
     // Modo sombra: un clasificador anota qué habría elegido; no cambia nada. Proveedor: Laya local ("laya") o Jev vía OpenRouter ("jev").
     shadow: {
       enabled: shadowEnabled,

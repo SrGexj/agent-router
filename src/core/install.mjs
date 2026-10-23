@@ -1,6 +1,7 @@
 // Piezas puras del instalador del alias `co`: settings con hooks, especificación de los servicios y plan de Laya.
 // Lo que depende de la plataforma (plist, unit de systemd, bloque de shell) vive en ./platform/.
 import { CO_AUTOCOMPACT_WINDOW } from "./compaction.mjs";
+import { buildLayaRequest } from "./classifier.mjs";
 import { servicePlist } from "./platform/darwin.mjs";
 import { coFunction, withBlock, withoutBlock, SHELL_START } from "./platform/shell.mjs";
 
@@ -62,6 +63,14 @@ export function layaInstallPlan({ python, venv, venvExists }) {
 export function layaServiceSpec({ label, serveBin, home, host, port, extraModels = {} }) {
   const env = { LAYA_HOST: host, LAYA_PORT: String(port), LAYA_MODELS: "multilingual", LAYA_DEFAULT_MODEL: "multilingual", USE_TF: "0", HF_HOME: `${home}/hf`, ...(Object.keys(extraModels).length && { LAYA_EXTRA_MODELS: JSON.stringify(extraModels) }) };
   return { label, argv: [serveBin], env, logFile: `${home}/laya.log` };
+}
+
+// Calentamiento: petición mínima y válida cada 45 s para que el servidor no se enfríe (la latencia en frío ronda los 300 ms).
+// Tarea periódica (startInterval), no demonio: solo la ejecuta launchd en macOS.
+export const LAYA_WARM_INTERVAL_S = 45;
+export function layaWarmSpec({ label, home, url, model }) {
+  const body = JSON.stringify(buildLayaRequest("calentamiento", model));
+  return { label, argv: ["/usr/bin/curl", "-sS", "-m", "10", "-o", "/dev/null", "-X", "POST", "-H", "Content-Type: application/json", "-d", body, url], env: {}, logFile: `${home}/laya-warm.log`, startInterval: LAYA_WARM_INTERVAL_S };
 }
 
 export const layaLaunchAgentPlist = (o) => servicePlist(layaServiceSpec(o));

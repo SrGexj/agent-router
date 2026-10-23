@@ -70,6 +70,9 @@ describe("relevo: reglas puras", () => {
     const c = relevoStartupContext("# Relevo\n- hecho X");
     expect(c).toMatch(/relevo de la sesión anterior/i);
     expect(c).toContain("# Relevo\n- hecho X");
+    expect(c).toMatch(/ya está completo/i);
+    expect(c).toMatch(/marcado como usado/i);
+    expect(c).toMatch(/no lo busques en disco/i);
   });
 
   it("etiqueta 'relevo' en la statusline al pasar el umbral, sin tocar el resto", () => {

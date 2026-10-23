@@ -208,7 +208,7 @@ try {
   if (config.layaRouting !== "off") {
     try {
       const classifier = createLayaClassifier({ url: config.shadow.layaUrl, fetch, timeoutMs: config.layaTimeoutMs, ...(config.layaRoutingModel && { model: config.layaRoutingModel }) });
-      const routed = await routeAgent({ payload, mode: config.layaRouting, threshold: config.layaDowngradeThreshold, classifier, timeoutMs: config.layaTimeoutMs });
+      const routed = await routeAgent({ payload, mode: config.layaRouting, threshold: config.layaDowngradeThreshold, classifier, timeoutMs: config.layaTimeoutMs + 200 }); // margen: que venza antes el timeout del clasificador (lleva errorKind)
       if (routed) {
         if (session.runId) await store.append(session.runId, routed.event);
         if (routed.output) {

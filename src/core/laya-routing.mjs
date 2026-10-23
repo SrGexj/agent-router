@@ -19,7 +19,7 @@ export function decideRouting({ mode, requested, result, threshold }) {
   return { applied };
 }
 
-export function layaDecisionEvent({ payload, requested, result, latencyMs, mode, applied, t, error }) {
+export function layaDecisionEvent({ payload, requested, result, latencyMs, mode, applied, t, error, errorKind, layaModel }) {
   return {
     type: "laya_decision",
     ...(payload?.tool_use_id ? { toolUseId: payload.tool_use_id } : {}),
@@ -29,7 +29,9 @@ export function layaDecisionEvent({ payload, requested, result, latencyMs, mode,
     latencyMs,
     mode,
     applied,
+    ...(layaModel ? { layaModel } : {}),
     ...(error ? { error } : {}),
+    ...(error && errorKind ? { errorKind } : {}),
     t
   };
 }
@@ -42,8 +44,9 @@ const withTimeout = (promise, ms) => new Promise((resolve, reject) => {
   promise.then((v) => { clearTimeout(timer); resolve(v); }, (e) => { clearTimeout(timer); reject(e); });
 });
 
+// timeoutMs: red de seguridad exterior; el presupuesto real lo fija el clasificador (debe ser algo mayor para que su errorKind llegue).
 // Devuelve null si no toca consultar; si no, { event, output, input }. output (o null) es lo que el hook escribe en stdout.
-export async function routeAgent({ payload, mode, threshold = 0.9, classifier, timeoutMs = 300, now = Date.now }) {
+export async function routeAgent({ payload, mode, threshold = 0.9, classifier, timeoutMs = 1000, now = Date.now }) {
   if (!mode || mode === "off" || !classifier) return null;
   if (payload?.hook_event_name !== "PreToolUse" || !AGENT_TOOLS.has(payload.tool_name)) return null;
   const input = payload.tool_input ?? {};
@@ -51,14 +54,16 @@ export async function routeAgent({ payload, mode, threshold = 0.9, classifier, t
   const t0 = now();
   let result = null;
   let error = null;
+  let errorKind = null;
   try {
     result = await withTimeout(classifier.classify(layaText(input)), timeoutMs);
   } catch (e) {
     error = String(e?.message ?? "error").slice(0, 120);
+    errorKind = e?.errorKind ?? (error === "timeout" ? "timeout" : null);
   }
   const { applied } = decideRouting({ mode, requested, result, threshold });
   const t = now();
-  const event = layaDecisionEvent({ payload, requested, result, latencyMs: result?.latencyMs ?? t - t0, mode, applied, t, error });
+  const event = layaDecisionEvent({ payload, requested, result, latencyMs: result?.latencyMs ?? t - t0, mode, applied, t, error, errorKind, layaModel: classifier.model });
   if (!applied) return { event, output: null, input };
   const updated = { ...input, subagent_type: "asistente" };
   return { event, output: updatedInputOutput(updated), input: updated };

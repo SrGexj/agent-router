@@ -187,6 +187,7 @@ Solo `src/config.mjs` lee variables de entorno. El resto del código recibe la c
 | `ROUTER_SHADOW_PROVIDER` | `laya` | `laya` (local) o `jev` (OpenRouter). |
 | `ROUTER_SHADOW_MODEL` | `typesafe/jev-1.13` | Solo con `jev`, vía OpenRouter. |
 | `ROUTER_LAYA_URL` | `http://127.0.0.1:4318/v1/systemone` | Endpoint de Laya. |
+| `ROUTER_LAYA_TIMEOUT_MS` | `1000` | Presupuesto único de Laya en el hook de Agent/Task (fail-open: al vencer, el hook sigue sin ella). En macOS, `npm run instalar` añade `com.agent-router.laya-warm`, que cada 45 s hace una petición mínima para que Laya no se enfríe (frío ~300 ms, caliente ~30 ms); `desinstalar` lo quita. |
 | `ROUTER_LAYA_VENV` | `~/.agent-router/laya-venv` | Entorno Python de Laya. |
 | `ROUTER_LAYA_HF_HOME` | `~/.agent-router/hf` | Caché de modelos de Hugging Face de Laya. |
 | `ROUTER_LAYA_PYTHON` | sin definir | Intérprete Python 3.12 o superior para crear el venv. Sin él, busca `python3.12` y luego `python3`. |

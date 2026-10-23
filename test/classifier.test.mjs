@@ -179,6 +179,22 @@ describe("Laya (local)", () => {
     await expect(make(slow, { timeoutMs: 20 }).classify("x")).rejects.toThrow("laya no disponible");
     await expect(make(okFetch({}, 503)).classify("x")).rejects.toThrow("laya no disponible");
   });
+  it("errorKind distingue timeout, conexión, http y parse sin cambiar el mensaje", async () => {
+    const kind = async (p) => p.then(() => null, (e) => e.errorKind);
+    const refused = async () => { throw new Error("ECONNREFUSED"); };
+    const slow = (_u, { signal }) => new Promise((_, rej) => signal.addEventListener("abort", () => rej(Object.assign(new Error("a"), { name: "AbortError" }))));
+    expect(await kind(make(refused).classify("x"))).toBe("connection");
+    expect(await kind(make(slow, { timeoutMs: 20 }).classify("x"))).toBe("timeout");
+    expect(await kind(make(okFetch({}, 503)).classify("x"))).toBe("http");
+    expect(await kind(make(okFetch({}, 400)).classify("x"))).toBe("http");
+    expect(await kind(make(okFetch({ answers: { route: { choice: "gpt" } } })).classify("x"))).toBe("parse");
+    expect(await kind(make(async () => ({ ok: true, status: 200, json: async () => { throw new Error("x"); } })).classify("x"))).toBe("parse");
+    await expect(make(slow, { timeoutMs: 20 }).classify("x")).rejects.toThrow("laya no disponible");
+  });
+  it("expone el modelo pedido", () => {
+    expect(make(async () => ({})).model).toBe(LAYA_MODEL);
+    expect(make(async () => ({}), { model: "encargos" }).model).toBe("encargos");
+  });
   it("JSON roto o elección inválida: error propio, no 'no disponible'", async () => {
     await expect(make(okFetch({ answers: { route: { choice: "gpt" } } })).classify("x")).rejects.toThrow(/elección/);
   });

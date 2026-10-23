@@ -89,6 +89,33 @@ function taskDoc(t, idx) {
   };
 }
 
+// "Tareas sin inicio registrado": el reducer descarta task_usage de un taskId sin task_start en este run (p. ej. un subagente
+// arrancado en un run anterior de la misma sesión y reanudado en este), pero ese gasto es real. Aquí se recoge aparte, con la
+// misma regla del reducer (snapshot sustituye, sin snapshot suma), y sale como tarea con agent/status null. No toca el estado del dashboard.
+function orphanUsage(events, known) {
+  const byTask = new Map();
+  for (const e of events) {
+    if (e.type !== "task_usage" || !e.taskId || known.has(e.taskId) || !e.byModel || typeof e.byModel !== "object") continue;
+    const prev = byTask.get(e.taskId);
+    if (e.snapshot || !prev) { byTask.set(e.taskId, { ...e.byModel }); continue; }
+    const sum = { ...prev };
+    for (const [model, u] of Object.entries(e.byModel)) sum[model] = addUsage(sum[model] ?? emptyUsage(), u);
+    byTask.set(e.taskId, sum);
+  }
+  return [...byTask.values()];
+}
+
+// Modelo de la fila huérfana: el de mayor volumen de tokens de su uso.
+function dominantModel(byModel) {
+  let best = null;
+  let bestTotal = -1;
+  for (const [model, u] of Object.entries(byModel)) {
+    const total = (nat(u?.input) ?? 0) + (nat(u?.output) ?? 0) + (nat(u?.cacheRead) ?? 0) + (nat(u?.cacheWrite5m) ?? 0) + (nat(u?.cacheWrite1h) ?? 0);
+    if (total > bestTotal) { best = model; bestTotal = total; }
+  }
+  return best;
+}
+
 // events: JSONL completo de un run. opts: { profile (clave del perfil), rev (nº de eventos al enviar) }.
 // Devuelve null si el run no está cerrado (sin run_end) o no hay run_start.
 export function buildTelemetry(events, { profile, rev } = {}) {
@@ -114,7 +141,10 @@ export function buildTelemetry(events, { profile, rev } = {}) {
     orchestratorUsage: usageList(end.byModel ?? run.orchestratorUsage),
     directEdits: nat(run.directEdits) ?? 0,
     errorKinds: kinds,
-    tasks: run.taskOrder.slice(0, MAX_TASKS).map((id, i) => taskDoc(run.tasks[id], i + 1))
+    tasks: [
+      ...run.taskOrder.map((id) => run.tasks[id]),
+      ...orphanUsage(events, new Set(Object.keys(run.tasks))).map((byModel) => ({ agent: null, model: dominantModel(byModel), status: null, usage: byModel }))
+    ].slice(0, MAX_TASKS).map((t, i) => taskDoc(t, i + 1))
   };
   return doc;
 }

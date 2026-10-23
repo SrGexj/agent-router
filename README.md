@@ -135,6 +135,7 @@ Al cerrarse un run (hook de `co`/`cop`, cierre con Esc o `router` headless) se l
 - Tokens por modelo del orquestador y de cada encargo (entrada, salida, caché).
 - Ediciones directas del orquestador y recuento de errores por tipo (`limit`, `api`, `permission`).
 - Por encargo: número de orden, agente, modelo, estado, duración, usos de herramientas e intento.
+- Tareas sin inicio registrado: si un subagente gasta tokens en un run donde no consta su arranque (por ejemplo, lo arrancó un run anterior de la misma sesión y se reanudó en este), el gasto se cuenta igualmente como una tarea más con `agent` y `status` a `null` y su modelo y tokens. El dashboard no las muestra; solo afectan al documento de telemetría.
 
 **Qué no se envía nunca**: texto de tareas, prompts, descripciones, resultados, rutas o `cwd`, mensajes de error, nombres de herramientas, `sessionId`, etiquetas manuales ni el token en ningún log.
 

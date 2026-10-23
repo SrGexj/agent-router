@@ -22,7 +22,7 @@ export function decideRelevo({ tokens, threshold, asked, path }) {
   return relevoPrompt(path, threshold);
 }
 
-export const relevoStartupContext = (md) => `Relevo de la sesión anterior en este proyecto; retómalo desde "siguiente paso" si sigue vigente:\n\n${md}`;
+export const relevoStartupContext = (md) => `Relevo de la sesión anterior en este proyecto; retómalo desde "siguiente paso" si sigue vigente. El relevo ya está completo abajo y el archivo ya fue marcado como usado: no lo busques en disco.\n\n${md}`;
 
 // Statusline: añade " · relevo" al texto cuando el contexto pasa el umbral (antes del salto de línea final, si lo hay).
 export function withRelevoTag(text, tokens, threshold) {

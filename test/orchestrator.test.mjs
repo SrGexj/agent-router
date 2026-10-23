@@ -61,6 +61,14 @@ describe("buildOrchestratorPrompt", () => {
     expect(regla.length).toBeLessThan(400);
   });
 
+  it("consultor obligatorio para planificar, elegir diseño, valorar riesgos y revisar lo delicado", () => {
+    const p = buildOrchestratorPrompt({ agents: { ...agents, consultor: { description: "Opus. Decide." } }, quota: null, now: NOW_MS });
+    expect(p).toMatch(/consultor es obligatorio/i);
+    expect(p).toMatch(/planificar/i);
+    expect(p).toMatch(/más de 3 pasos o dudas entre dos diseños, encárgalo a consultor en vez de resolverlo tú/);
+    expect(p).toContain("cambio trivial de una línea");
+  });
+
   it("sin browser no hay sección Navegador; con id la añade", () => {
     const base = buildOrchestratorPrompt({ agents, quota: null, now: NOW_MS });
     expect(base).not.toContain("## Navegador");

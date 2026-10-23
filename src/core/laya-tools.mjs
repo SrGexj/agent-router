@@ -103,8 +103,8 @@ async function prepareData({ store, opts, dataDir, seedsFile, log }) {
   }
   if (!min.ok) log(`Aviso (--forzar): ${min.reasons.join("; ")}.`);
   await mkdir(dataDir, { recursive: true });
-  await writeFile(join(dataDir, "train.csv"), toCsv(split.train));
-  await writeFile(join(dataDir, "eval.csv"), toCsv(split.eval));
+  await writeFile(join(dataDir, "train.csv"), toCsv(seeded.train));
+  await writeFile(join(dataDir, "eval.csv"), toCsv(seeded.eval));
   // Para entrenar y evaluar se usa JSONL con el mismo estado y preguntas que el servicio (el CSV de laya-train sintetiza otra pregunta).
   const trainJsonl = join(dataDir, "train.jsonl");
   const evalJsonl = join(dataDir, "eval.jsonl");

@@ -126,6 +126,9 @@ describe("laya-entrenar", () => {
     const t = new Set(trainRows.map((r) => r.state.body));
     expect(evalRows.some((r) => t.has(r.state.body))).toBe(false);
     expect(evalRows.filter((r) => r.expected.route === "opus").length).toBeGreaterThan(0);
+    expect(evalRows.filter((r) => r.expected.route === "asistente").length).toBeGreaterThan(0);
+    const csv = await readFile(join(res.outDir, "datos", "train.csv"), "utf8");
+    expect(csv.split("\n").filter((l) => l.includes(",semilla,")).length).toBe(trainRows.filter((r) => !r.state.body.startsWith("Tarea ")).length);
   });
   it("el mínimo sigue valiendo: sin suficientes ejemplos totales se niega aunque haya semillas", async () => {
     await seed("a", 2, "asistente");

@@ -218,7 +218,8 @@ try {
     } catch { /* Laya nunca puede romper ni bloquear el hook */ }
   }
 
-  const ctx = { profile: config.profile };
+  // Última cuota que vio la statusline en esta sesión (la deja en <sesión>.quota.json); sin ella, null.
+  const ctx = { profile: config.profile, quota: await sessions.loadQuota(payload.session_id) };
   // Flags de la sesión (ediciones directas, relevo ya avisado): solo se leen en los dos eventos que los usan.
   const useFlags = payload.hook_event_name === "UserPromptSubmit" || isDirectEdit(payload);
   const flags = useFlags ? await sessions.loadFlags(payload.session_id) : null;

@@ -90,6 +90,19 @@ router --agentes-usuario "…"                            # usa tus agentes de ~
 
 Sin `--model`, Opus orquesta. Con `--model` se usa un único modelo (`haiku`, `sonnet` u `opus`).
 
+### Cuota por ejecución: `router cuota`
+
+Compara cuánta cuota (5 h y 7 d) gasta cada orquestador (Sonnet frente a Opus, etc.). Cada ejecución guarda la cuota conocida de su cuenta al empezar (`run_start.quota`) y al terminar (`run_end.quota`, junto con `mainModel` y `byModel`, los tokens por modelo y tipo), tomada de la última lectura de la statusline; sin dato guarda `null`. Sirve igual para `co` y `cop` (el perfil va en el evento y el informe agrupa por perfil, porque cada cuenta tiene su propia cuota).
+
+```bash
+router cuota                       # todos los días
+router cuota --dias 7 --perfil trabajo
+router cuota --detalle             # lista cada run no fiable con su motivo
+router cuota --aprox               # incluye runs anteriores al registro (cuota aproximada)
+```
+
+Tabla por día, orquestador y perfil: nº de runs, runs con delta completo, puntos porcentuales por run (fin menos inicio) y sumados, tokens del orquestador y de subagentes, encargos y puntos por encargo. Se ignoran los runs que cruzan un reset, abiertos o sin dato, y se cuentan como NO FIABLES. Límites: la statusline da la cuota en puntos enteros, y si usas la misma cuenta en otra sesión a la vez, sus gastos también suman al delta.
+
 ### Sesiones interactivas: `co`
 
 `co` es `claude` en modo orquestador y acepta sus mismas opciones:

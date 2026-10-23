@@ -85,13 +85,28 @@ export function interruptedIn(transcriptText) {
   return (transcriptText ?? "").split("\n").some(isInterruptEntry);
 }
 
-const cancelEvent = (t) => ({ type: "run_end", exitCode: 130, status: "cancelled", t });
-const cancelEvents = (t, usage) => [...usageEvents("orchestrator_usage", usage, t), cancelEvent(t)];
+// Cuota conocida (último evento quota de la sesión, que mantiene la statusline) reducida a lo que se compara entre runs.
+// undefined = el llamante no la aportó (no se añade el campo); null = no hay dato (se registra null).
+export function quotaSnapshot(q) {
+  if (q === undefined) return undefined;
+  if (!q || (!q.fiveHour && !q.sevenDay)) return null;
+  return { fiveHour: q.fiveHour ?? null, sevenDay: q.sevenDay ?? null, profile: q.profile ?? null, seenAt: q.t ?? null };
+}
+
+// Campos del cierre de un run: cuota, orquestador y tokens por modelo y tipo (los mismos de orchestrator_usage).
+const endFields = ({ quota, mainModel, usage }) => ({
+  ...(quotaSnapshot(quota) !== undefined && { quota: quotaSnapshot(quota) }),
+  ...(mainModel && { mainModel }),
+  ...(usage && Object.keys(usage.byModel ?? {}).length > 0 && { byModel: usage.byModel })
+});
+
+const cancelEvent = (t, extra = {}) => ({ type: "run_end", exitCode: 130, status: "cancelled", ...extra, t });
+const cancelEvents = (t, usage, quota, mainModel) => [...usageEvents("orchestrator_usage", usage, t), cancelEvent(t, endFields({ quota, mainModel, usage }))];
 
 // Esc no dispara ningún hook: quien detecta la marca en el transcript (la statusline) cierra así.
-export function closeInterrupted(session, now, usage = null) {
+export function closeInterrupted(session, now, usage = null, quota = undefined) {
   if (!session.runId) return null;
-  return { runId: session.runId, events: cancelEvents(now, usage), session: { runId: null, lastRunId: session.runId, seq: session.seq } };
+  return { runId: session.runId, events: cancelEvents(now, usage, quota, session.mainModel), session: { runId: null, lastRunId: session.runId, seq: session.seq } };
 }
 
 // Gasto del orquestador en vivo: PostToolUse del orquestador, PreToolUse al delegar (Agent/Task) y SubagentStop,
@@ -120,7 +135,7 @@ export function translateHook(p, session, now, makeRunId, ctx = {}) {
   if (p.hook_event_name === "UserPromptSubmit") {
     // Con una ejecución abierta: si hubo Esc, se cierra y empieza otra; si no, es un mensaje a mitad de turno.
     if (open && !ctx.interrupted) return none;
-    const before = open ? { runId: open, events: cancelEvents(t, ctx.orchestratorUsage) } : undefined;
+    const before = open ? { runId: open, events: cancelEvents(t, ctx.orchestratorUsage, ctx.quota, session.mainModel) } : undefined;
     const seq = session.seq + 1;
     const runId = makeRunId(now, String(p.session_id ?? "sesion").slice(0, 8), seq);
     const next = { runId, lastRunId: runId, seq, ...(ctx.mainModel && { mainModel: ctx.mainModel }) };
@@ -128,7 +143,7 @@ export function translateHook(p, session, now, makeRunId, ctx = {}) {
     const res = {
       runId,
       session: next,
-      events: [{ type: "run_start", runId, task: p.prompt ?? "", mode: "sesion", model: "opus", cwd: p.cwd ?? null, profile: ctx.profile ?? "trabajo", ...(ctx.directEdits > 0 && { directEdits: ctx.directEdits }), t }]
+      events: [{ type: "run_start", runId, task: p.prompt ?? "", mode: "sesion", model: "opus", cwd: p.cwd ?? null, profile: ctx.profile ?? "trabajo", ...(ctx.directEdits > 0 && { directEdits: ctx.directEdits }), ...(quotaSnapshot(ctx.quota) !== undefined && { quota: quotaSnapshot(ctx.quota) }), t }]
     };
     // Etiqueta del orquestador desde el primer mensaje, sin esperar al primer hook en vivo.
     if (ctx.mainModel) res.events.push({ type: "main_model", model: ctx.mainModel, t });
@@ -144,7 +159,9 @@ export function translateHook(p, session, now, makeRunId, ctx = {}) {
   const mainModelEvents = () => (ctx.mainModel && ctx.mainModel !== session.mainModel ? [{ type: "main_model", model: ctx.mainModel, t }] : []);
   const close = (events) => {
     const end = events.findIndex((e) => e.type === "run_end");
-    const all = [...events.slice(0, end), ...mainModelEvents(), ...(ctx.contextEvents ?? []), ...usageEvents("orchestrator_usage", ctx.orchestratorUsage, t), ...events.slice(end)];
+    const fields = endFields({ quota: ctx.quota, mainModel: ctx.mainModel ?? session.mainModel, usage: ctx.orchestratorUsage });
+    const closing = events.slice(end).map((e) => (e.type === "run_end" ? { ...e, ...fields, t: e.t } : e));
+    const all = [...events.slice(0, end), ...mainModelEvents(), ...(ctx.contextEvents ?? []), ...usageEvents("orchestrator_usage", ctx.orchestratorUsage, t), ...closing];
     return { runId: open, session: { runId: null, lastRunId: open, seq: session.seq }, events: all };
   };
   // Con el estrangulado cumplido y datos leídos, la instantánea acumulada va al final y se recuerda cuándo y hasta dónde se leyó.

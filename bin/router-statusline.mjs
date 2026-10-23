@@ -54,7 +54,7 @@ try {
       && interruptedIn(await readSince(input.transcript_path, session.transcriptOffset))) {
       let usage = null;
       try { usage = usageFromTranscript(await readFrom(input.transcript_path, session.transcriptOffset), { sidechain: false }); } catch { /* sin coste */ }
-      const closed = closeInterrupted(session, Date.now(), usage);
+      const closed = closeInterrupted(session, Date.now(), usage, quotaFromStatusline(input, Date.now(), config.profile) ?? (await sessions.loadQuota(sessionId)));
       for (const ev of closed.events) await store.append(closed.runId, ev);
       await sessions.save(sessionId, closed.session);
     }

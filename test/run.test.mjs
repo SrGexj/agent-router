@@ -180,3 +180,24 @@ describe("runTask", () => {
     expect(res.status).toBe("cancelled");
   });
 });
+
+describe("runTask registra la cuota al inicio y al fin", () => {
+  const quotaEv = (five, profile, t) => ({ type: "quota", status: "allowed", limitType: null, fiveHour: { utilization: five, resetsAt: 5000 }, sevenDay: { utilization: 0.5, resetsAt: 9000 }, profile, t });
+
+  it("run_start y run_end llevan la última cuota conocida del perfil (null si no hay)", async () => {
+    const store = createStore({ runsDir: dir });
+    await store.append("20260101T000000Z-1-a", quotaEv(0.1, "personal", 1));
+    await store.append("20260101T000000Z-1-a", quotaEv(0.9, "trabajo", 2));
+    const { spawn } = fakeSpawn({ lines: [] });
+    await runTask({ task: "x", mode: "manual", model: "sonnet", config, store, spawn, now, out: sink(), runId: "20260102T000000Z-2-b", profile: "personal" });
+    const evs = await store.readRun("20260102T000000Z-2-b");
+    expect(evs[0]).toMatchObject({ type: "run_start", quota: { profile: "personal", fiveHour: { utilization: 0.1 } } });
+    expect(evs.at(-1)).toMatchObject({ type: "run_end", quota: { profile: "personal", fiveHour: { utilization: 0.1 } } });
+
+    const empty = createStore({ runsDir: join(dir, "vacio") });
+    await runTask({ task: "x", mode: "manual", model: "sonnet", config, store: empty, spawn, now, out: sink(), runId: "20260103T000000Z-3-c", profile: "personal" });
+    const evs2 = await empty.readRun("20260103T000000Z-3-c");
+    expect(evs2[0].quota).toBeNull();
+    expect(evs2.at(-1).quota).toBeNull();
+  });
+});

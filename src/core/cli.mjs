@@ -16,6 +16,10 @@ Opciones:
 Cuota por ejecución:
   router cuota [--dias N] [--perfil P] [--detalle] [--aprox]   Puntos de cuota (5 h y 7 d) por día, orquestador y perfil; marca los runs no fiables.
 
+Telemetría (opt-in, solo métricas; se activa con ROUTER_TELEMETRY_URL y ROUTER_TELEMETRY_TOKEN):
+  router telemetry flush                      Envía al servicio los runs cerrados pendientes (los últimos 30 días). Se lanza solo al cerrar cada run.
+  router telemetry status                     Estado: activada o no, runs pendientes, enviados y rechazados, últimos errores.
+
 Copia estable:
   router actualizar                           Pasa ~/.agent-router/app a origin/main (fetch), reconstruye y reinicia el dashboard.
 
@@ -29,6 +33,16 @@ Ajustar Laya con tus datos:
 export const isActualizarCommand = (word) => word === "actualizar";
 
 export const isCuotaCommand = (word) => word === "cuota";
+
+export const isTelemetryCommand = (word) => word === "telemetry";
+
+// Argumentos de `router telemetry`. Puro; lanza con un mensaje en castellano si algo no cuadra.
+export function parseTelemetryArgs(argv) {
+  const [, action, ...rest] = argv;
+  if (action !== "flush" && action !== "status") throw new Error(`Uso: router telemetry flush | status${action ? ` (no existe «${action}»)` : ""}.`);
+  if (rest.length) throw new Error(`Opción no válida para telemetry ${action}: ${rest[0]}.`);
+  return { action };
+}
 
 // Argumentos de `router cuota`. Puro; lanza con un mensaje en castellano si algo no cuadra.
 export function parseCuotaArgs(argv) {

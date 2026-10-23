@@ -22,6 +22,7 @@ import { routeAgent } from "../src/core/laya-routing.mjs";
 import { collectPending, formatPending } from "../src/core/pending.mjs";
 import { decideRelevo, relevoPath, relevoStartupContext, relevoUsedPath } from "../src/core/relevo.mjs";
 import { DIRECT_EDIT_WARNING, isDirectEdit } from "../src/core/delegar.mjs";
+import { launchTelemetryFlush } from "../src/core/telemetry-flush.mjs";
 
 const config = loadConfig();
 
@@ -269,6 +270,10 @@ try {
   for (const ev of res.events) await store.append(res.runId, ev);
   if (res.session !== session) await sessions.save(payload.session_id, res.session);
   if (res.shadow) await launchShadow(res.shadow);
+  // Run cerrado: un hijo desacoplado envía la telemetría (el hook no espera ni hace red). Desactivada, no lanza nada.
+  if ([...(res.before?.events ?? []), ...res.events].some((e) => e.type === "run_end")) {
+    launchTelemetryFlush({ config, script: fileURLToPath(new URL("./router.mjs", import.meta.url)) });
+  }
   if (payload.hook_event_name === "UserPromptSubmit") await onRelevoCheck(payload, sessions, flags);
 } catch (e) {
   try {

@@ -117,6 +117,29 @@ En un proyecto con su propio `.claude/agents/asistente.md`, `programador.md` o `
 
 **Segundo perfil (opcional).** Si defines `ROUTER_PROFILE2_DIR` con la carpeta de config de otra cuenta antes de ejecutar `npm run instalar` (si la carpeta existe), el instalador añade el alias `cop` (o el que indiques en `ROUTER_PROFILE2_ALIAS`). `cop` ejecuta `co` con `CLAUDE_CONFIG_DIR` apuntando a esa carpeta y con los argumentos de `ROUTER_PROFILE2_ARGS`.
 
+### Telemetría opcional: `router telemetry`
+
+Opt-in y apagada por defecto. Con `ROUTER_TELEMETRY_URL` y `ROUTER_TELEMETRY_TOKEN` definidas, cada run cerrado envía sus **métricas** a un servicio propio (el esquema está en el repo `agent-router-telemetry`). Sin las dos claves no se hace ninguna petición ni se crea ningún archivo.
+
+```bash
+router telemetry status   # activada o no, pendientes, enviados, rechazados y últimos errores
+router telemetry flush    # envía ahora los pendientes (lo lanza solo cada run al cerrarse)
+```
+
+Al cerrarse un run (hook de `co`/`cop`, cierre con Esc o `router` headless) se lanza en segundo plano `router telemetry flush`; nunca espera ni bloquea la sesión y cualquier fallo se traga y se anota en `<ROUTER_HOME>/telemetry-errors.log` (sin el token). Los runs cerrados de los últimos 30 días se envían en lotes de hasta 50 con `POST <URL>/v1/runs` y `Authorization: Bearer <token>`, con 3 s de tope por petición. Se reenvía un run solo si ha crecido desde el último envío. Estado en `<ROUTER_HOME>/telemetry-sent.json` (`{runId: nº de eventos}`) y `telemetry-rejected.json`; un `400` marca el run como rechazado (no se reintenta) y anota su id y el mensaje de validación, nunca su contenido; un `401` o un `5xx` o la falta de red dejan los runs pendientes para el siguiente intento.
+
+**Qué se envía** (solo números, estados y ids de modelo):
+- Id del run, versión (`rev`), clave del perfil (no su etiqueta), modo (`sesion`, `orquestado` o `directo`) y estado final.
+- Modelo real del orquestador, código de salida, inicio, fin y duración.
+- Cuota al empezar y al acabar: porcentaje de 5 h y de 7 d (0 a 100) y su momento de reinicio.
+- Tokens por modelo del orquestador y de cada encargo (entrada, salida, caché).
+- Ediciones directas del orquestador y recuento de errores por tipo (`limit`, `api`, `permission`).
+- Por encargo: número de orden, agente, modelo, estado, duración, usos de herramientas e intento.
+
+**Qué no se envía nunca**: texto de tareas, prompts, descripciones, resultados, rutas o `cwd`, mensajes de error, nombres de herramientas, `sessionId`, etiquetas manuales ni el token en ningún log.
+
+**Desactivar**: quita `ROUTER_TELEMETRY_URL` (de `config.env` y del entorno). Lo ya enviado se borra en el servicio, no aquí.
+
 ### Dashboard
 
 El dashboard corre como servicio en http://127.0.0.1:4317. La primera sesión `co` lo abre en el navegador.
@@ -174,6 +197,8 @@ Solo `src/config.mjs` lee variables de entorno. El resto del código recibe la c
 | `ROUTER_PROFILE2_ARGS` | vacío | Argumentos extra para `claude` en ese perfil (por ejemplo, canales). |
 | `ROUTER_PROFILE_BROWSER_ID` | sin definir | `deviceId` (UUID) del navegador de Claude in Chrome del perfil principal. Si se define, el prompt del orquestador le manda ejecutar `select_browser` con ese id antes de usar el navegador. |
 | `ROUTER_PROFILE2_BROWSER_ID` | sin definir | Lo mismo para el segundo perfil (`cop`). Cada perfil usa solo su id. |
+| `ROUTER_TELEMETRY_URL` | sin definir | URL base del servicio de telemetría (por ejemplo `https://telemetry.example.com`). Debe ser `https`; `http` solo para `localhost`, `127.0.0.1` y `::1`. Sin ella (o sin el token) la telemetría está desactivada. |
+| `ROUTER_TELEMETRY_TOKEN` | sin definir | Token Bearer del servicio. Nunca se imprime ni se escribe en logs. |
 
 ### Dónde se definen
 

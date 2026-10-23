@@ -26,15 +26,21 @@ export function trainingRows(runs, { profile = "todos" } = {}) {
   return rows.sort((a, b) => (a.runId < b.runId ? -1 : a.runId > b.runId ? 1 : 0));
 }
 
-// Semillas locales (JSONL fuera del repo, una por línea {origin,label,text}): las líneas inválidas se saltan.
+// Una semilla sin etiqueta cuenta como opus (compatibilidad con las primeras semillas, que eran todas de opus).
+const DEFAULT_SEED_LABEL = "opus";
+const seedRow = (s) => ({ ...s, label: s.label ?? DEFAULT_SEED_LABEL, source: "semilla" });
+
+// Semillas locales (JSONL fuera del repo, una por línea {origin,label,text}): las líneas inválidas o con etiqueta fuera de CHOICES se saltan; sin etiqueta = opus.
 export function parseLocalSeeds(text) {
   const out = [];
   for (const line of String(text ?? "").split("\n")) {
     if (!line.trim()) continue;
     let r;
     try { r = JSON.parse(line); } catch { continue; }
-    if (!r || typeof r.text !== "string" || !r.text.trim() || !CHOICES.includes(r.label)) continue;
-    out.push({ text: r.text, label: r.label, origin: typeof r.origin === "string" ? r.origin : "historico" });
+    if (!r || typeof r.text !== "string" || !r.text.trim()) continue;
+    const label = r.label ?? DEFAULT_SEED_LABEL;
+    if (!CHOICES.includes(label)) continue;
+    out.push({ text: r.text, label, origin: typeof r.origin === "string" ? r.origin : "historico" });
   }
   return out;
 }
@@ -51,7 +57,7 @@ export function withSeeds(rows, local = [], evalRows = []) {
     const k = textKey(s.text);
     if (seen.has(k)) continue;
     seen.add(k);
-    extra.push({ ...s, source: "semilla" });
+    extra.push(seedRow(s));
   }
   return [...(rows ?? []), ...extra];
 }
@@ -68,7 +74,7 @@ export function addSeeds(trainRows, evalRows, local = [], ratio = SEED_EVAL_RATI
     const k = textKey(s.text);
     if (seen.has(k)) continue;
     seen.add(k);
-    (inEvalSet(k, ratio) ? ev : train).push({ ...s, source: "semilla" });
+    (inEvalSet(k, ratio) ? ev : train).push(seedRow(s));
   }
   return { train, eval: ev };
 }

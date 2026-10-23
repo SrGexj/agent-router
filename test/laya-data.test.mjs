@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { CHOICES } from "../src/core/classifier.mjs";
 import {
   trainingRows, csvField, toCsv, CSV_HEADER, inEvalSet, splitRows, distribution, classWarnings, checkMinimum,
   toJsonl, withSeeds, addSeeds, SEED_EVAL_RATIO, parseLocalSeeds, scoreEval, compareScores, layaTrainArgs
@@ -155,12 +156,12 @@ describe("evaluación", () => {
 });
 
 describe("semillas versionadas", () => {
-  it("withSeeds añade semillas opus con origen y sin duplicar texto", () => {
+  it("withSeeds añade semillas con origen y sin duplicar texto", () => {
     const out = withSeeds([{ text: "a", label: "programador", runId: "r1" }]);
     expect(out[0]).toEqual({ text: "a", label: "programador", runId: "r1" });
     const seeds = out.slice(1);
     expect(seeds.length).toBeGreaterThanOrEqual(30);
-    expect(seeds.every((r) => r.label === "opus" && r.source === "semilla" && ["manual", "historico"].includes(r.origin))).toBe(true);
+    expect(seeds.every((r) => CHOICES.includes(r.label) && r.source === "semilla" && ["manual", "historico"].includes(r.origin))).toBe(true);
     expect(new Set(seeds.map((r) => r.text)).size).toBe(seeds.length);
     expect(withSeeds(out)).toHaveLength(out.length);
   });
@@ -170,6 +171,61 @@ describe("semillas versionadas", () => {
   it("toJsonl las serializa como cualquier fila", () => {
     const l = JSON.parse(toJsonl(withSeeds([])).split("\n")[0]);
     expect(l.expected).toEqual({ route: "opus" });
+  });
+});
+
+describe("semillas por etiqueta", () => {
+  const seeds = withSeeds([]);
+  const of = (label) => seeds.filter((r) => r.label === label);
+  it("hay semillas manuales de asistente, programador y opus", () => {
+    expect(of("asistente").filter((r) => r.origin === "manual").length).toBeGreaterThanOrEqual(28);
+    expect(of("programador").filter((r) => r.origin === "manual").length).toBeGreaterThanOrEqual(9);
+    expect(of("opus").filter((r) => r.origin === "manual").length).toBeGreaterThanOrEqual(30);
+  });
+  it("cada semilla versionada tiene una etiqueta válida", () => {
+    expect(seeds.every((r) => CHOICES.includes(r.label))).toBe(true);
+  });
+  it("una semilla sin etiqueta cuenta como opus", () => {
+    const out = addSeeds([], [], [{ text: "sin etiqueta local", origin: "historico" }]);
+    const row = [...out.train, ...out.eval].find((r) => r.text === "sin etiqueta local");
+    expect(row.label).toBe("opus");
+    expect(withSeeds([], [{ text: "otra sin etiqueta" }]).find((r) => r.text === "otra sin etiqueta").label).toBe("opus");
+  });
+  it("addSeeds reparte cada etiqueta ~75/25 y de forma determinista", () => {
+    const a = addSeeds([], []);
+    expect(addSeeds([], [])).toEqual(a);
+    for (const label of CHOICES) {
+      const t = a.train.filter((r) => r.label === label).length;
+      const e = a.eval.filter((r) => r.label === label).length;
+      expect(t + e).toBe(of(label).length);
+      expect(t).toBeGreaterThan(0);
+    }
+    for (const label of ["asistente", "opus"]) {
+      const e = a.eval.filter((r) => r.label === label).length;
+      expect(e / of(label).length).toBeGreaterThan(0.1);
+      expect(e / of(label).length).toBeLessThan(0.45);
+    }
+  });
+  it("con muchas semillas locales de cada etiqueta el reparto se acerca a 75/25", () => {
+    const local = CHOICES.flatMap((label) => Array.from({ length: 120 }, (_, i) => ({ text: `local ${label} ${i}`, label, origin: "historico" })));
+    const a = addSeeds([], [], local);
+    for (const label of CHOICES) {
+      const e = a.eval.filter((r) => r.label === label && r.text.startsWith("local")).length;
+      expect(e / 120).toBeGreaterThan(0.15);
+      expect(e / 120).toBeLessThan(0.35);
+    }
+  });
+  it("sin solape train/eval en ninguna etiqueta", () => {
+    const a = addSeeds([], []);
+    const t = new Set(a.train.map((r) => r.text.trim().toLowerCase()));
+    expect(a.eval.some((r) => t.has(r.text.trim().toLowerCase()))).toBe(false);
+  });
+  it("las semillas de train cuentan en el mínimo de su propia clase", () => {
+    const a = addSeeds([], []);
+    const dist = distribution(a.train.filter((r) => r.source === "semilla"));
+    for (const label of CHOICES) expect(dist[label]).toBe(a.train.filter((r) => r.label === label).length);
+    expect(dist.asistente).toBeGreaterThanOrEqual(15);
+    expect(checkMinimum(distribution([...a.train, ...a.eval]), { minTotal: 1, minPerClass: 1 }).ok).toBe(true);
   });
 });
 
@@ -237,6 +293,13 @@ describe("semillas locales (JSONL fuera del repo)", () => {
     expect(out.map((r) => r.text)).toEqual(["buena uno", "buena dos"]);
     expect(out[0]).toEqual({ text: "buena uno", label: "opus", origin: "historico" });
     expect(parseLocalSeeds(undefined)).toEqual([]);
+  });
+  it("parseLocalSeeds: sin etiqueta = opus; etiqueta inválida se salta; asistente se conserva", () => {
+    const out = parseLocalSeeds([l({ text: "sin etiqueta" }), l({ label: "asistente", text: "para haiku" }), l({ label: "otra", text: "mala" }), l({ label: 3, text: "numérica" })].join("\n"));
+    expect(out).toEqual([
+      { text: "sin etiqueta", label: "opus", origin: "historico" },
+      { text: "para haiku", label: "asistente", origin: "historico" }
+    ]);
   });
   it("withSeeds añade las locales como semilla, sin repetir texto de filas ni de manuales", () => {
     const manual = withSeeds([]).find((r) => r.origin === "manual").text;

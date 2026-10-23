@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   trainingRows, csvField, toCsv, CSV_HEADER, inEvalSet, splitRows, distribution, classWarnings, checkMinimum,
-  toJsonl, scoreEval, compareScores, layaTrainArgs
+  toJsonl, withSeeds, parseLocalSeeds, scoreEval, compareScores, layaTrainArgs
 } from "../src/core/laya-data.mjs";
 
 const run = (id, task, over = {}) => ({
@@ -124,5 +124,50 @@ describe("evaluación", () => {
     expect(compareScores({ accuracy: 0.7 }, { accuracy: 0.7 }).winner).toBe("empate");
     expect(compareScores({ accuracy: 0.7 }, { accuracy: 0.6 }).winner).toBe("base");
     expect(compareScores({ accuracy: null }, { accuracy: 0.6 }).winner).toBe("empate");
+  });
+});
+
+describe("semillas versionadas", () => {
+  it("withSeeds añade semillas opus con origen y sin duplicar texto", () => {
+    const out = withSeeds([{ text: "a", label: "programador", runId: "r1" }]);
+    expect(out[0]).toEqual({ text: "a", label: "programador", runId: "r1" });
+    const seeds = out.slice(1);
+    expect(seeds.length).toBeGreaterThanOrEqual(30);
+    expect(seeds.every((r) => r.label === "opus" && r.source === "semilla" && ["manual", "historico"].includes(r.origin))).toBe(true);
+    expect(new Set(seeds.map((r) => r.text)).size).toBe(seeds.length);
+    expect(withSeeds(out)).toHaveLength(out.length);
+  });
+  it("las semillas no traen rutas personales ni correos", () => {
+    for (const r of withSeeds([])) expect(r.text).not.toMatch(/\/Users\/|@\w+\.\w+|sk-/);
+  });
+  it("toJsonl las serializa como cualquier fila", () => {
+    const l = JSON.parse(toJsonl(withSeeds([])).split("\n")[0]);
+    expect(l.expected).toEqual({ route: "opus" });
+  });
+});
+
+describe("semillas locales (JSONL fuera del repo)", () => {
+  const l = (o) => JSON.stringify(o);
+  it("parseLocalSeeds salta líneas inválidas y conserva las buenas", () => {
+    const text = [
+      l({ origin: "historico", label: "opus", text: "buena uno" }),
+      "no es json",
+      l({ origin: "historico", label: "otra", text: "etiqueta no válida" }),
+      l({ origin: "historico", label: "opus", text: "   " }),
+      l({ label: "programador", text: "buena dos" }),
+      ""
+    ].join("\n");
+    const out = parseLocalSeeds(text);
+    expect(out.map((r) => r.text)).toEqual(["buena uno", "buena dos"]);
+    expect(out[0]).toEqual({ text: "buena uno", label: "opus", origin: "historico" });
+    expect(parseLocalSeeds(undefined)).toEqual([]);
+  });
+  it("withSeeds añade las locales como semilla, sin repetir texto de filas ni de manuales", () => {
+    const manual = withSeeds([]).find((r) => r.origin === "manual").text;
+    const extra = [{ text: "local", label: "opus", origin: "historico" }, { text: manual, label: "opus", origin: "historico" }, { text: "fila", label: "opus", origin: "historico" }];
+    const out = withSeeds([{ text: "fila", label: "programador" }], extra);
+    expect(out.filter((r) => r.text === "local")).toEqual([{ text: "local", label: "opus", origin: "historico", source: "semilla" }]);
+    expect(out.filter((r) => r.text === manual)).toHaveLength(1);
+    expect(out.filter((r) => r.text === "fila")).toHaveLength(1);
   });
 });

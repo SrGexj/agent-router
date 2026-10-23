@@ -44,6 +44,18 @@ describe("buildClassifierRequest", () => {
   });
 });
 
+describe("pregunta de ruta", () => {
+  const q = buildClassifierRequest("x", "m").questions.route;
+  it("no sesga a programación y describe opus como planificar/diseñar/riesgo", () => {
+    expect(q.instructions).not.toMatch(/programaci/i);
+    for (const k of ["planific", "diseño", "arquitectura", "riesgos", "migraciones", "ambigu"]) expect(q.criteria.opus.toLowerCase()).toContain(k);
+  });
+  it("programador = código ya decidido; asistente = acotado con criterio claro", () => {
+    expect(q.criteria.programador).toMatch(/código ya decidido/);
+    expect(q.criteria.asistente).toMatch(/criterio claro/);
+  });
+});
+
 describe("parseClassifierResponse", () => {
   it("lee la fixture", () => {
     expect(parseClassifierResponse(fixture)).toMatchObject({ choice: "asistente", confidence: 0.97, usage: { input: 312, output: 34 }, costUsd: null });

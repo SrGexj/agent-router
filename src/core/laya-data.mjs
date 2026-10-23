@@ -3,6 +3,7 @@
 import { createHash } from "node:crypto";
 import { CHOICES, buildLayaRequest, sanitizePrompt } from "./classifier.mjs";
 import { trainingLabel } from "./details.mjs";
+import { SEEDS } from "./laya-seeds.mjs";
 
 export const CSV_HEADER = "texto,etiqueta,perfil,fuente,runId";
 export const DEFAULT_EVAL_RATIO = 0.2;
@@ -23,6 +24,31 @@ export function trainingRows(runs, { profile = "todos" } = {}) {
     rows.push({ text, label: t.label, profile: profileOf(run), source: t.source, runId: run.id });
   }
   return rows.sort((a, b) => (a.runId < b.runId ? -1 : a.runId > b.runId ? 1 : 0));
+}
+
+// Semillas locales (JSONL fuera del repo, una por línea {origin,label,text}): las líneas inválidas se saltan.
+export function parseLocalSeeds(text) {
+  const out = [];
+  for (const line of String(text ?? "").split("\n")) {
+    if (!line.trim()) continue;
+    let r;
+    try { r = JSON.parse(line); } catch { continue; }
+    if (!r || typeof r.text !== "string" || !r.text.trim() || !CHOICES.includes(r.label)) continue;
+    out.push({ text: r.text, label: r.label, origin: typeof r.origin === "string" ? r.origin : "historico" });
+  }
+  return out;
+}
+
+// Añade las semillas versionadas (src/core/laya-seeds.mjs) y las locales a las filas de entrenamiento, sin repetir textos.
+export function withSeeds(rows, local = []) {
+  const seen = new Set((rows ?? []).map((r) => r.text));
+  const extra = [];
+  for (const s of [...SEEDS, ...local]) {
+    if (seen.has(s.text)) continue;
+    seen.add(s.text);
+    extra.push({ ...s, source: "semilla" });
+  }
+  return [...(rows ?? []), ...extra];
 }
 
 export function csvField(value) {

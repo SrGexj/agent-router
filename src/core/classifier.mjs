@@ -23,11 +23,11 @@ export function sanitizePrompt(text) {
 const ROUTE_QUESTIONS = {
   route: {
     type: "choice",
-    instructions: "¿Quién debe llevar esta tarea de programación?",
+    instructions: "¿Qué modelo debe llevar esta tarea: el más capaz para planificar, diseñar o valorar riesgos, o uno menor para ejecutar lo ya decidido?",
     criteria: {
       asistente: "Basta un modelo pequeño (Haiku): encargo acotado con criterio claro de bien/mal, como pasar tests y reportar, cambios de texto o documentación, renombrar, comprobar salidas.",
-      programador: "Un modelo medio (Sonnet): escribir código ya decidido, arreglar bugs concretos, refactors localizados.",
-      opus: "Hace falta el modelo más capaz (Opus): arquitectura, decisiones de producto, piezas delicadas (autenticación, cifrado, migraciones, borrados), tareas ambiguas, conversación o planificación."
+      programador: "Un modelo medio (Sonnet): escribir código ya decidido, arreglar bugs concretos, refactors localizados. Si falta decidir el enfoque, no es para él.",
+      opus: "Hace falta el modelo más capaz (Opus): planificar (más de 3 pasos o varias piezas), diseño y arquitectura, decisiones de producto, valorar riesgos (seguridad, datos, migraciones, rendimiento), revisión delicada de un cambio (autenticación, cifrado, borrados) y tareas ambiguas o abiertas."
     }
   }
 };

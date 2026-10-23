@@ -27,7 +27,8 @@ Ajustar Laya con tus datos:
   router laya-datos [--out archivo.csv] [--perfil <id>|todos]   Exporta las ejecuciones etiquetadas (y un CSV de evaluación aparte).
   router laya-entrenar [--perfil P] [--forzar] [--simular]                  Exporta, ajusta Laya con laya-train y compara con el modelo base.
       [--datos CARPETA]   usa CARPETA/train.jsonl y test.jsonl en vez de las ejecuciones guardadas
-      [--micro-batch N] [--grad-accum N] [--max-len N]   memoria (por defecto 1, 64 y 512)
+      [--micro-batch N] [--grad-accum N] [--max-len N]   memoria (por defecto 1, 8 y 512)
+      [--loss soft-ce|rlcd] [--epochs N] [--freeze-encoder] [--seed N]   ajuste (por defecto soft-ce, 6 épocas, sin congelar, semilla de laya-train)
   router laya-usar CARPETA | --quitar                                       Anota qué checkpoint usar y explica cómo aplicarlo.`;
 
 export const isActualizarCommand = (word) => word === "actualizar";
@@ -76,7 +77,7 @@ export const isLayaCommand = (word) => LAYA_COMMANDS.has(word);
 export function parseLayaArgs(argv) {
   const [command, ...rest] = argv;
   if (!LAYA_COMMANDS.has(command)) throw new Error(`Subcomando no válido: ${command ?? "(vacío)"}.`);
-  const out = { command, out: null, profile: "todos", force: false, dryRun: false, dir: null, remove: false, datos: null, microBatch: 1, gradAccum: 64, maxLen: 512 };
+  const out = { command, out: null, profile: "todos", force: false, dryRun: false, dir: null, remove: false, datos: null, microBatch: 1, gradAccum: 8, maxLen: 512, loss: "soft-ce", epochs: 6, freezeEncoder: false, seed: null };
   const posInt = (flag, i) => {
     const v = value(flag, i);
     if (!/^[1-9]\d*$/.test(v)) throw new Error(`Valor de ${flag} no válido: ${v} (entero positivo).`);
@@ -99,6 +100,16 @@ export function parseLayaArgs(argv) {
     else if (a === "--micro-batch" && command === "laya-entrenar") out.microBatch = posInt(a, ++i);
     else if (a === "--grad-accum" && command === "laya-entrenar") out.gradAccum = posInt(a, ++i);
     else if (a === "--max-len" && command === "laya-entrenar") out.maxLen = posInt(a, ++i);
+    else if (a === "--epochs" && command === "laya-entrenar") out.epochs = posInt(a, ++i);
+    else if (a === "--loss" && command === "laya-entrenar") {
+      out.loss = value(a, ++i);
+      if (!["soft-ce", "rlcd"].includes(out.loss)) throw new Error(`Valor de --loss no válido: ${out.loss} (soft-ce o rlcd).`);
+    } else if (a === "--freeze-encoder" && command === "laya-entrenar") out.freezeEncoder = true;
+    else if (a === "--seed" && command === "laya-entrenar") {
+      const v = value(a, ++i);
+      if (!/^\d+$/.test(v)) throw new Error(`Valor de --seed no válido: ${v} (entero no negativo).`);
+      out.seed = Number(v);
+    }
     else if (a === "--quitar" && command === "laya-usar") out.remove = true;
     else if (command === "laya-usar" && !a.startsWith("--") && !out.dir) out.dir = a;
     else throw new Error(`Opción no válida para ${command}: ${a}.`);

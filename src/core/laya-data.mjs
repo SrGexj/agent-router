@@ -108,6 +108,48 @@ export function distribution(rows) {
   return out;
 }
 
+// PRNG determinista (mulberry32): mismo seed, misma secuencia.
+function prng(seed) {
+  let a = (Number(seed) || 0) >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 2 ** 32;
+  };
+}
+
+// Duplica ejemplos de las clases minoritarias hasta igualar a la mayoritaria. Los originales quedan primero y en su orden;
+// los duplicados se reparten por igual dentro de la clase (barajado con semilla). Solo para el train, nunca el eval.
+export function oversample(items, { seed = 0 } = {}) {
+  const list = items ?? [];
+  const byClass = Object.fromEntries(CHOICES.map((c) => [c, list.filter((r) => r.label === c)]));
+  const max = Math.max(0, ...CHOICES.map((c) => byClass[c].length));
+  const rand = prng(seed);
+  const extras = [];
+  for (const c of CHOICES) {
+    const rows = byClass[c];
+    if (rows.length === 0 || rows.length === max) continue;
+    let pool = [];
+    for (let n = rows.length; n < max; n++) {
+      if (pool.length === 0) {
+        pool = [...rows];
+        for (let i = pool.length - 1; i > 0; i--) { const j = Math.floor(rand() * (i + 1)); [pool[i], pool[j]] = [pool[j], pool[i]]; }
+      }
+      extras.push(pool.pop());
+    }
+  }
+  return [...list, ...extras];
+}
+
+// Por clase, cuántas etiquetas son corrección manual del usuario, automáticas (lo que hizo Opus) o semillas.
+export function sourceBreakdown(rows) {
+  const out = Object.fromEntries(CHOICES.map((c) => [c, { usuario: 0, auto: 0, semilla: 0 }]));
+  for (const r of rows ?? []) if (out[r.label] && r.source in out[r.label]) out[r.label][r.source] += 1;
+  return out;
+}
+
 export const classWarnings = (dist, min = MIN_PER_CLASS) => CHOICES.filter((c) => (dist[c] ?? 0) < min);
 
 export function checkMinimum(dist, { minTotal = MIN_TOTAL, minPerClass = MIN_PER_CLASS } = {}) {
@@ -125,8 +167,17 @@ export function toJsonl(rows) {
   return (rows ?? []).map((r) => JSON.stringify({ state: { body: r.text }, questions, expected: { route: r.label } })).join("\n") + "\n";
 }
 
-export function layaTrainArgs({ data, out, base, dryRun = false, textColumn = null, labelColumn = null, microBatch = null, gradAccum = null, maxLen = null }) {
+// Valores por defecto de laya-entrenar (laya-train usa rlcd, 4 épocas y grad-accum 64: con 200 ejemplos son 12 actualizaciones y colapsa).
+export const TRAIN_DEFAULTS = { loss: "soft-ce", gradAccum: 8, epochs: 6 };
+export const LOSSES = ["soft-ce", "rlcd"];
+
+export function layaTrainArgs({ data, out, base, dryRun = false, textColumn = null, labelColumn = null, microBatch = null, gradAccum = null, maxLen = null, loss = null, epochs = null, eval: evalPath = null, freezeEncoder = false, seed = null }) {
   const args = ["--data", data, "--out", out, "--base", base];
+  if (evalPath) args.push("--eval", evalPath);
+  if (loss) args.push("--loss", loss);
+  if (epochs) args.push("--epochs", String(epochs));
+  if (seed != null) args.push("--seed", String(seed));
+  if (freezeEncoder) args.push("--freeze-encoder");
   if (microBatch) args.push("--micro-batch", String(microBatch));
   if (gradAccum) args.push("--grad-accum", String(gradAccum));
   if (maxLen) args.push("--max-len", String(maxLen));
@@ -151,10 +202,28 @@ export function scoreEval(gold, preds) {
   return { n, accuracy: n ? correct / n : null, byClass };
 }
 
+// Caída máxima por clase (puntos porcentuales) que se tolera aunque la global suba.
+export const MAX_CAIDA_CLASE = 0.05;
+
+// Clases con ejemplos en eval que empeoran más de MAX_CAIDA_CLASE o que quedan en 0 %.
+function regresionesPorClase(base, nuevo) {
+  const out = [];
+  for (const clase of CHOICES) {
+    const b = base?.byClass?.[clase];
+    const n = nuevo?.byClass?.[clase];
+    if (!b?.n || b.accuracy == null || n?.accuracy == null) continue;
+    if (b.accuracy - n.accuracy > MAX_CAIDA_CLASE + 1e-9 || (n.accuracy === 0 && b.accuracy > 0)) out.push({ clase, base: b.accuracy, nuevo: n.accuracy });
+  }
+  return out;
+}
+
 export function compareScores(base, nuevo) {
-  if (base?.accuracy == null || nuevo?.accuracy == null) return { winner: "empate", delta: null };
+  if (base?.accuracy == null || nuevo?.accuracy == null) return { winner: "empate", delta: null, regresiones: [] };
   const delta = nuevo.accuracy - base.accuracy;
-  return { winner: delta > 1e-9 ? "nuevo" : delta < -1e-9 ? "base" : "empate", delta };
+  if (delta < -1e-9) return { winner: "base", delta, regresiones: [] };
+  if (delta <= 1e-9) return { winner: "empate", delta, regresiones: [] };
+  const regresiones = regresionesPorClase(base, nuevo);
+  return { winner: regresiones.length ? "regresion" : "nuevo", delta, regresiones };
 }
 
 // Filas de un JSONL de laya-train (datos externos) en la forma que usa scoreEval: {label, text}.

@@ -1,7 +1,7 @@
 // Informe de cuota por ejecución: cuántos puntos porcentuales (5 h y 7 d) gasta cada run, por día, orquestador y perfil.
 // Puro: recibe las listas de eventos de cada run. Lee `quota` de run_start/run_end (exacto); en runs anteriores a ese
 // registro aproxima con el primer y el último evento `quota` del run y lo marca como aproximado (no entra en las sumas).
-import { totalTokens } from "./pricing.mjs";
+import { totalTokens, modelFamily } from "./pricing.mjs";
 
 const WINDOWS = [["fiveHour", "5h"], ["sevenDay", "7d"]];
 
@@ -70,14 +70,35 @@ export function analyzeRun(events) {
   };
 }
 
+// El alias de la CLI ("opus") y el id real (claude-opus-5-5) son el mismo orquestador. Los runs antiguos solo guardaron
+// el alias: se agrupan bajo el id real más frecuente de su familia en el informe; sin ninguno, queda el alias.
+const SHORT_ALIAS = /^(opus|sonnet|haiku)$/i;
+function aliasResolver(analyses) {
+  const counts = new Map();
+  for (const a of analyses) {
+    if (!a.orchestrator || a.orchestrator === "?" || SHORT_ALIAS.test(a.orchestrator)) continue;
+    const fam = modelFamily(a.orchestrator);
+    const byName = counts.get(fam) ?? new Map();
+    byName.set(a.orchestrator, (byName.get(a.orchestrator) ?? 0) + 1);
+    counts.set(fam, byName);
+  }
+  return (name) => {
+    if (!SHORT_ALIAS.test(name ?? "")) return name;
+    const best = [...(counts.get(modelFamily(name)) ?? [])].sort((x, y) => y[1] - x[1])[0];
+    return best ? best[0] : name;
+  };
+}
+
 const round1 = (n) => Math.round(n * 10) / 10;
 
 export function buildCuotaReport(analyses, { approx = false } = {}) {
   const groups = new Map();
+  const resolve = aliasResolver(analyses);
   for (const a of analyses) {
     if (!a.day) continue;
-    const key = `${a.day}|${a.orchestrator}|${a.profile}`;
-    if (!groups.has(key)) groups.set(key, { day: a.day, orchestrator: a.orchestrator, profile: a.profile, runs: 0, reliable: 0, sum5: 0, n5: 0, tasks5: 0, sum7: 0, n7: 0, tasks7: 0, tasks: 0, orchTokens: 0, subTokens: 0 });
+    const orchestrator = resolve(a.orchestrator);
+    const key = `${a.day}|${orchestrator}|${a.profile}`;
+    if (!groups.has(key)) groups.set(key, { day: a.day, orchestrator, profile: a.profile, runs: 0, reliable: 0, sum5: 0, n5: 0, tasks5: 0, sum7: 0, n7: 0, tasks7: 0, tasks: 0, orchTokens: 0, subTokens: 0 });
     const g = groups.get(key);
     g.runs += 1;
     const exact = a.closed && (approx || !a.approx);

@@ -56,6 +56,7 @@ export async function runTask({ task, mode, model, effort = null, agents = null,
   let stderrTail = "";
   let sawError = false;
   let cancelled = false;
+  let seenModel = null; // modelo real del orquestador que vio el parser (el alias de la CLI es solo respaldo)
 
   const exitCode = await new Promise((resolve) => {
     let child;
@@ -87,6 +88,7 @@ export async function runTask({ task, mode, model, effort = null, agents = null,
     rl.on("line", (line) => {
       for (const ev of parser.pushLine(line, now())) {
         if (ev.type === "error") sawError = true;
+        if (ev.type === "main_model") seenModel = ev.model;
         emit(ev);
         out.write(terminalLine(ev, names));
       }
@@ -103,13 +105,10 @@ export async function runTask({ task, mode, model, effort = null, agents = null,
   }
 
   await Promise.all(writes); // la cuota del cierre incluye los eventos quota de este mismo run
-  const endEvent = { type: "run_end", exitCode, quota: quotaSnapshot(await store.latestQuota(profile)), mainModel: model, t: now() };
-  if (cancelled) endEvent.status = "cancelled";
-  emit(endEvent);
+  const limited = (await store.readRun(runId)).some((e) => e.type === "error" && e.kind === "limit");
+  const status = cancelled ? "cancelled" : limited ? "limited" : exitCode === 0 ? "completed" : "failed";
+  emit({ type: "run_end", exitCode, status, quota: quotaSnapshot(await store.latestQuota(profile)), mainModel: seenModel ?? model, t: now() });
   await Promise.all(writes);
 
-  const events = await store.readRun(runId);
-  const limited = events.some((e) => e.type === "error" && e.kind === "limit");
-  const status = cancelled ? "cancelled" : limited ? "limited" : exitCode === 0 ? "completed" : "failed";
   return { runId, exitCode, status };
 }

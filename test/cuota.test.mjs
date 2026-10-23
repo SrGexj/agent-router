@@ -160,3 +160,17 @@ describe("cli cuota", () => {
     expect(() => parseCuotaArgs(["cuota", "--foo"])).toThrow();
   });
 });
+
+describe("orquestador: alias y modelo real se unen", () => {
+  it("un run con main_model real y otro solo con el alias 'opus' caen en la misma fila", () => {
+    const t = day("2026-10-20T10:00:00Z");
+    const real = analyzeRun(run({ id: "a", model: "claude-opus-5-5", start: snap(0.1, 0.5), end: snap(0.2, 0.5) }));
+    const alias = analyzeRun([
+      { type: "run_start", runId: "b", task: "x", mode: "sesion", model: "opus", t, quota: snap(0.2, 0.5) },
+      { type: "run_end", exitCode: 0, mainModel: "opus", t: t + 1000, quota: snap(0.3, 0.5) }
+    ]);
+    const rows = buildCuotaReport([real, alias]);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ orchestrator: "claude-opus-5-5", runs: 2 });
+  });
+});

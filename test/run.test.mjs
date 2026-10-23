@@ -212,3 +212,32 @@ describe("runTask registra la cuota al inicio y al fin", () => {
     expect(evs2.at(-1).quota).toBeNull();
   });
 });
+
+describe("runTask registra estado y modelo real en run_end", () => {
+  const opusLine = JSON.stringify({ type: "assistant", message: { model: "claude-opus-5-5", id: "m1", type: "message", role: "assistant", content: [{ type: "text", text: "hola" }], usage: { input_tokens: 1, output_tokens: 1 } } });
+  const endOf = async (opts, spawnOpts) => {
+    const store = createStore({ runsDir: dir });
+    const { spawn } = fakeSpawn(spawnOpts);
+    await runTask({ task: "x", mode: "manual", model: "opus", config, store, spawn, now, out: sink(), runId: "r-estado", ...opts });
+    return (await store.readRun("r-estado")).findLast((e) => e.type === "run_end");
+  };
+
+  it("exit 0 completed, exit distinto de 0 failed", async () => {
+    expect(await endOf({}, { lines: [] })).toMatchObject({ exitCode: 0, status: "completed" });
+  });
+
+  it("exit distinto de 0 es failed", async () => {
+    expect(await endOf({}, { lines: [], code: 1, stderr: "boom" })).toMatchObject({ exitCode: 1, status: "failed" });
+  });
+
+  it("cancelado es cancelled", async () => {
+    const ac = new AbortController();
+    ac.abort();
+    expect(await endOf({ signal: ac.signal }, { lines: [] })).toMatchObject({ status: "cancelled" });
+  });
+
+  it("mainModel es el modelo real que vio el parser, o el alias si no hay", async () => {
+    expect((await endOf({}, { lines: [opusLine] })).mainModel).toBe("claude-opus-5-5");
+    expect((await endOf({}, { lines: [] })).mainModel).toBe("opus");
+  });
+});

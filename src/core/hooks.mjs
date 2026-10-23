@@ -4,6 +4,7 @@
 
 import { sanitizePrompt } from "./classifier.mjs";
 import { isDirectEdit } from "./delegar.mjs";
+import { totalTokens } from "./pricing.mjs";
 
 const AGENT_TOOLS = new Set(["Agent", "Task"]);
 const WAIT_TOOLS = new Set(["AskUserQuestion", "ExitPlanMode"]);
@@ -99,6 +100,12 @@ const endFields = ({ quota, mainModel, usage }) => ({
   ...(mainModel && { mainModel }),
   ...(usage && Object.keys(usage.byModel ?? {}).length > 0 && { byModel: usage.byModel })
 });
+
+// Tokens de un encargo sumando todos los modelos de su transcript; null sin datos o con suma 0.
+const agentTokens = (usage) => {
+  const n = Object.values(usage?.byModel ?? {}).reduce((acc, u) => acc + totalTokens(u), 0);
+  return n > 0 ? n : null;
+};
 
 const cancelEvent = (t, extra = {}) => ({ type: "run_end", exitCode: 130, status: "cancelled", ...extra, t });
 const cancelEvents = (t, usage, quota, mainModel) => [...usageEvents("orchestrator_usage", usage, t), cancelEvent(t, endFields({ quota, mainModel, usage }))];
@@ -249,7 +256,7 @@ export function translateHook(p, session, now, makeRunId, ctx = {}) {
         {
           type: "task_end", taskId: p.agent_id, status, ...(error ? { error } : {}), ...(denied ? { permissionDenied: true } : {}), model: sum.model ?? null,
           summary: short(p.last_assistant_message, 200), result: short(p.last_assistant_message, RESULT_MAX),
-          tokens: sum.tokens ?? null, toolUses: sum.toolUses ?? null, durationMs: sum.durationMs ?? null, t
+          tokens: sum.tokens ?? agentTokens(ctx.agentUsage), toolUses: sum.toolUses ?? null, durationMs: sum.durationMs ?? null, t
         }
       ]);
       if (res.session.agents) {
@@ -273,12 +280,12 @@ export function translateHook(p, session, now, makeRunId, ctx = {}) {
       // Tareas en segundo plano que no son subagentes del run (shells, monitores) no dejan la ejecución abierta:
       // sin subagentes en marcha la sesión queda parada esperando al usuario. Sin dato (ctx.runningTasks) se asume que sí hay.
       if ((p.background_tasks ?? []).length > 0 && (ctx.runningTasks ?? 1) > 0) return keep([{ type: "thinking", taskId: null, text: "", t }]);
-      return close([{ type: "run_end", exitCode: 0, t }]);
+      return close([{ type: "run_end", exitCode: 0, status: "completed", t }]);
     case "StopFailure": {
       const err = p.error === "rate_limit"
         ? { type: "error", kind: "limit", window: null, resetsAt: null, message: "Límite de uso alcanzado", t }
         : { type: "error", kind: "api", message: p.error_details ? `${p.error}: ${p.error_details}` : String(p.error ?? "error"), t };
-      return close([err, { type: "run_end", exitCode: 1, t }]);
+      return close([err, { type: "run_end", exitCode: 1, status: err.kind === "limit" ? "limited" : "failed", t }]);
     }
     case "SessionEnd":
       return close([{ type: "run_end", exitCode: 0, status: "cancelled", t }]);

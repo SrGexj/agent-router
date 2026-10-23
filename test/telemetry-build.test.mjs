@@ -158,6 +158,89 @@ describe("buildTelemetry: contenido", () => {
   });
 });
 
+describe("buildTelemetry: tareas sin inicio registrado (task_usage huérfano)", () => {
+  const withOrphans = (extra) => {
+    const events = fixture();
+    events.splice(events.length - 1, 0, ...extra);
+    return events;
+  };
+  const sumOf = (rows) => (rows ?? []).reduce((a, r) => a + r.input + r.output + r.cacheRead + r.cacheWrite5m + r.cacheWrite1h, 0);
+  const total = (d) => sumOf(d.orchestratorUsage) + d.tasks.reduce((a, t) => a + (t.usage ? sumOf(t.usage) : 0), 0);
+
+  it("un task_usage sin task_start crea una fila con agent null, status null y el modelo del uso", () => {
+    const base = build();
+    const d = build(withOrphans([
+      { type: "task_usage", taskId: "zz", snapshot: true, byModel: { "claude-sonnet-5-5": u(5000) }, t: T0 + 96 },
+      { type: "task_end", taskId: "zz", status: "completed", t: T0 + 97 }
+    ]));
+    expect(d.tasks).toHaveLength(base.tasks.length + 1);
+    expect(d.tasks.at(-1)).toEqual({ idx: 3, agent: null, model: "claude-sonnet-5-5", status: null, durationMs: null, toolUses: null, attempt: null, usage: [{ model: "claude-sonnet-5-5", ...u(5000) }] });
+    expect(total(d)).toBe(total(base) + sumOf([{ model: "m", ...u(5000) }]));
+  });
+
+  it("varias instantáneas del mismo huérfano: manda la última; sin snapshot suman", () => {
+    const snap = build(withOrphans([
+      { type: "task_usage", taskId: "zz", snapshot: true, byModel: { "claude-sonnet-5-5": u(10) }, t: T0 + 96 },
+      { type: "task_usage", taskId: "zz", snapshot: true, byModel: { "claude-sonnet-5-5": u(30) }, t: T0 + 97 }
+    ]));
+    expect(snap.tasks.at(-1).usage).toEqual([{ model: "claude-sonnet-5-5", ...u(30) }]);
+    const add = build(withOrphans([
+      { type: "task_usage", taskId: "zz", byModel: { "claude-sonnet-5-5": u(10) }, t: T0 + 96 },
+      { type: "task_usage", taskId: "zz", byModel: { "claude-sonnet-5-5": u(30) }, t: T0 + 97 }
+    ]));
+    expect(add.tasks.at(-1).usage).toEqual([{ model: "claude-sonnet-5-5", input: 40, output: 42, cacheRead: 44, cacheWrite5m: 46, cacheWrite1h: 0 }]);
+  });
+
+  it("un huérfano no duplica una tarea que sí tiene task_start", () => {
+    const d = build(withOrphans([{ type: "task_usage", taskId: "a1", snapshot: true, byModel: { "claude-sonnet-5-5": u(100) }, t: T0 + 96 }]));
+    expect(d.tasks).toHaveLength(2);
+  });
+
+  it("run del ejemplo en miniatura: 5 starts, 2 huérfanos, todo el gasto cuenta", () => {
+    const events = [{ type: "run_start", runId: "r-ej", task: "x", mode: "orquestado", model: "opus", profile: "trabajo", t: T0 }];
+    for (const id of ["s1", "s2", "s3", "s4", "s5"]) events.push({ type: "task_start", taskId: id, agent: "programador", t: T0 + 1 }, { type: "task_usage", taskId: id, snapshot: true, byModel: { "claude-sonnet-5-5": u(10) }, t: T0 + 2 });
+    events.push({ type: "tool", taskId: "o1", name: "Bash", t: T0 + 3 }, { type: "task_usage", taskId: "o1", byModel: { "claude-opus-5-5": u(1000) }, t: T0 + 4 }, { type: "task_end", taskId: "o1", status: "completed", t: T0 + 5 });
+    events.push({ type: "task_usage", taskId: "o2", snapshot: true, byModel: { "claude-sonnet-5-5": u(2000), "claude-haiku-5-5": u(1) }, t: T0 + 6 });
+    events.push({ type: "run_end", exitCode: 0, status: "completed", t: T0 + 10 });
+    const d = build(events);
+    expect(d.tasks).toHaveLength(7);
+    expect(d.tasks.map((t) => t.idx)).toEqual([1, 2, 3, 4, 5, 6, 7]);
+    expect(d.tasks.slice(5).map((t) => t.agent)).toEqual([null, null]);
+    expect(d.tasks[5].model).toBe("claude-opus-5-5");
+    expect(d.tasks[6].usage).toHaveLength(2);
+    expect(total(d)).toBe(5 * sumOf([u(10)]) + sumOf([u(1000)]) + sumOf([u(2000), u(1)]));
+    expect(runSchema.safeParse(d).success).toBe(true);
+  });
+
+  it("task_end o tool huérfanos sin task_usage no crean fila", () => {
+    const d = build(withOrphans([{ type: "tool", taskId: "zz", name: "Bash", t: T0 + 96 }, { type: "task_end", taskId: "zz", status: "completed", t: T0 + 97 }]));
+    expect(d.tasks).toHaveLength(2);
+  });
+
+  it("límites: máximo 500 tareas con idx únicos y 20 filas de uso por tarea", () => {
+    const events = [{ type: "run_start", runId: "r-lim", task: "x", mode: "orquestado", model: "opus", profile: "trabajo", t: T0 }];
+    for (let i = 0; i < 30; i++) events.push({ type: "task_start", taskId: `s${i}`, agent: "programador", t: T0 + 1 });
+    for (let i = 0; i < 600; i++) events.push({ type: "task_usage", taskId: `o${i}`, snapshot: true, byModel: { "claude-sonnet-5-5": u(i) }, t: T0 + 2 });
+    const many = {};
+    for (let i = 0; i < 25; i++) many[`modelo-${i}`] = u(i);
+    events.push({ type: "task_usage", taskId: "muchos", snapshot: true, byModel: many, t: T0 + 3 }, { type: "run_end", exitCode: 0, status: "completed", t: T0 + 10 });
+    const d = build(events);
+    expect(d.tasks).toHaveLength(500);
+    expect(new Set(d.tasks.map((t) => t.idx)).size).toBe(500);
+    expect(d.tasks.slice(0, 30).every((t) => t.agent === "programador")).toBe(true);
+    expect(runSchema.safeParse(d).success).toBe(true);
+    const e2 = events.filter((e) => !e.taskId?.startsWith("o"));
+    const d2 = build(e2);
+    expect(d2.tasks.at(-1).usage).toHaveLength(20);
+    expect(runSchema.safeParse(d2).success).toBe(true);
+  });
+
+  it("no filtra texto del evento huérfano", () => {
+    const d = build(withOrphans([{ type: "task_usage", taskId: `${S}-id`, snapshot: true, byModel: { "claude-sonnet-5-5": u(1) }, note: `${S} nota`, t: T0 + 96 }]));
+    expect(JSON.stringify(d)).not.toContain(S);
+  });
+});
+
 describe("buildTelemetry: contrato del servicio", () => {
   it("el documento valida contra el esquema zod estricto", () => {
     const r = runSchema.safeParse(build());

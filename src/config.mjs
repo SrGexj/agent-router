@@ -243,6 +243,8 @@ export function loadConfig(processEnv = process.env, { exists = existsSync, read
       hfHome: env.ROUTER_LAYA_HF_HOME || join(home, "hf"),
       modelsDir: join(home, "laya-modelos"),
       activeFile: join(home, "laya-modelo-activo"),
+      // Semillas locales opcionales (JSONL {origin,label,text}) que se suman solo al entrenamiento; no se versionan.
+      seedsFile: join(home, "dataset/semillas.jsonl"),
       base: "multilingual",
       // Entorno de los procesos hijos (laya-train y la evaluación): lo mínimo del sistema más lo de Laya.
       env: {

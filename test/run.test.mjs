@@ -132,6 +132,17 @@ describe("runTask", () => {
     expect(sys).toContain("5 h: 80 %");
   });
 
+  it("mete el navegador del perfil en el prompt, y no en modo manual", async () => {
+    const store = createStore({ runsDir: dir });
+    const browser = { id: "11111111-2222-3333-4444-555555555555", label: "Trabajo" };
+    const a = fakeSpawn();
+    await runTask({ task: "x", mode: "orquestado", model: "opus", agents, config, store, spawn: a.spawn, now, out: sink(), runId: "r2b", browser });
+    expect(a.calls[0].args[a.calls[0].args.indexOf("--append-system-prompt") + 1]).toContain(browser.id);
+    const b = fakeSpawn();
+    await runTask({ task: "x", mode: "orquestado", model: "opus", agents, config, store, spawn: b.spawn, now, out: sink(), runId: "r2c" });
+    expect(b.calls[0].args[b.calls[0].args.indexOf("--append-system-prompt") + 1]).not.toContain("## Navegador");
+  });
+
   it("modo manual: sin prompt de orquestador", async () => {
     const store = createStore({ runsDir: dir });
     const { spawn, calls } = fakeSpawn();
@@ -178,5 +189,55 @@ describe("runTask", () => {
     const res = await p;
     expect(calls[0].child.killedWith).toBe("SIGINT");
     expect(res.status).toBe("cancelled");
+  });
+});
+
+describe("runTask registra la cuota al inicio y al fin", () => {
+  const quotaEv = (five, profile, t) => ({ type: "quota", status: "allowed", limitType: null, fiveHour: { utilization: five, resetsAt: 5000 }, sevenDay: { utilization: 0.5, resetsAt: 9000 }, profile, t });
+
+  it("run_start y run_end llevan la última cuota conocida del perfil (null si no hay)", async () => {
+    const store = createStore({ runsDir: dir });
+    await store.append("20260101T000000Z-1-a", quotaEv(0.1, "personal", 1));
+    await store.append("20260101T000000Z-1-a", quotaEv(0.9, "trabajo", 2));
+    const { spawn } = fakeSpawn({ lines: [] });
+    await runTask({ task: "x", mode: "manual", model: "sonnet", config, store, spawn, now, out: sink(), runId: "20260102T000000Z-2-b", profile: "personal" });
+    const evs = await store.readRun("20260102T000000Z-2-b");
+    expect(evs[0]).toMatchObject({ type: "run_start", quota: { profile: "personal", fiveHour: { utilization: 0.1 } } });
+    expect(evs.at(-1)).toMatchObject({ type: "run_end", quota: { profile: "personal", fiveHour: { utilization: 0.1 } } });
+
+    const empty = createStore({ runsDir: join(dir, "vacio") });
+    await runTask({ task: "x", mode: "manual", model: "sonnet", config, store: empty, spawn, now, out: sink(), runId: "20260103T000000Z-3-c", profile: "personal" });
+    const evs2 = await empty.readRun("20260103T000000Z-3-c");
+    expect(evs2[0].quota).toBeNull();
+    expect(evs2.at(-1).quota).toBeNull();
+  });
+});
+
+describe("runTask registra estado y modelo real en run_end", () => {
+  const opusLine = JSON.stringify({ type: "assistant", message: { model: "claude-opus-5-5", id: "m1", type: "message", role: "assistant", content: [{ type: "text", text: "hola" }], usage: { input_tokens: 1, output_tokens: 1 } } });
+  const endOf = async (opts, spawnOpts) => {
+    const store = createStore({ runsDir: dir });
+    const { spawn } = fakeSpawn(spawnOpts);
+    await runTask({ task: "x", mode: "manual", model: "opus", config, store, spawn, now, out: sink(), runId: "r-estado", ...opts });
+    return (await store.readRun("r-estado")).findLast((e) => e.type === "run_end");
+  };
+
+  it("exit 0 completed, exit distinto de 0 failed", async () => {
+    expect(await endOf({}, { lines: [] })).toMatchObject({ exitCode: 0, status: "completed" });
+  });
+
+  it("exit distinto de 0 es failed", async () => {
+    expect(await endOf({}, { lines: [], code: 1, stderr: "boom" })).toMatchObject({ exitCode: 1, status: "failed" });
+  });
+
+  it("cancelado es cancelled", async () => {
+    const ac = new AbortController();
+    ac.abort();
+    expect(await endOf({ signal: ac.signal }, { lines: [] })).toMatchObject({ status: "cancelled" });
+  });
+
+  it("mainModel es el modelo real que vio el parser, o el alias si no hay", async () => {
+    expect((await endOf({}, { lines: [opusLine] })).mainModel).toBe("claude-opus-5-5");
+    expect((await endOf({}, { lines: [] })).mainModel).toBe("opus");
   });
 });

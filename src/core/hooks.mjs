@@ -3,6 +3,8 @@
 // como parámetros. Cada mensaje del usuario es una ejecución del dashboard.
 
 import { sanitizePrompt } from "./classifier.mjs";
+import { isDirectEdit } from "./delegar.mjs";
+import { totalTokens } from "./pricing.mjs";
 
 const AGENT_TOOLS = new Set(["Agent", "Task"]);
 const WAIT_TOOLS = new Set(["AskUserQuestion", "ExitPlanMode"]);
@@ -71,6 +73,19 @@ export function endedAgentsFrom(prompt) {
   return [...out].map(([taskId, status]) => ({ taskId, status }));
 }
 
+// Un encargo con la misma descripción (sin mayúsculas ni espacios de más) en la misma ejecución es un reintento.
+// requests: { [descripción normalizada]: { agent, attempt } }, vive en la sesión y se pierde al cerrar la ejecución.
+const normDescription = (d) => String(d ?? "").trim().toLowerCase();
+
+export function retryInfo(requests, description, agent) {
+  const key = normDescription(description);
+  if (!key) return { fields: { attempt: 1 }, requests: null };
+  const prev = requests?.[key];
+  const attempt = (prev?.attempt ?? 0) + 1;
+  const fields = prev ? { attempt, previousAgent: prev.agent, ...(prev.agent !== agent ? { escalated: true } : {}) } : { attempt };
+  return { fields, requests: { ...(requests ?? {}), [key]: { agent, attempt } } };
+}
+
 const INTERRUPT = "[Request interrupted by user";
 
 // Solo cuenta la entrada que escribe Claude Code al pulsar Esc: un mensaje "user" de la sesión
@@ -90,13 +105,34 @@ export function interruptedIn(transcriptText) {
   return (transcriptText ?? "").split("\n").some(isInterruptEntry);
 }
 
-const cancelEvent = (t) => ({ type: "run_end", exitCode: 130, status: "cancelled", t });
-const cancelEvents = (t, usage) => [...usageEvents("orchestrator_usage", usage, t), cancelEvent(t)];
+// Cuota conocida (último evento quota de la sesión, que mantiene la statusline) reducida a lo que se compara entre runs.
+// undefined = el llamante no la aportó (no se añade el campo); null = no hay dato (se registra null).
+export function quotaSnapshot(q) {
+  if (q === undefined) return undefined;
+  if (!q || (!q.fiveHour && !q.sevenDay)) return null;
+  return { fiveHour: q.fiveHour ?? null, sevenDay: q.sevenDay ?? null, profile: q.profile ?? null, seenAt: q.t ?? null };
+}
+
+// Campos del cierre de un run: cuota, orquestador y tokens por modelo y tipo (los mismos de orchestrator_usage).
+const endFields = ({ quota, mainModel, usage }) => ({
+  ...(quotaSnapshot(quota) !== undefined && { quota: quotaSnapshot(quota) }),
+  ...(mainModel && { mainModel }),
+  ...(usage && Object.keys(usage.byModel ?? {}).length > 0 && { byModel: usage.byModel })
+});
+
+// Tokens de un encargo sumando todos los modelos de su transcript; null sin datos o con suma 0.
+const agentTokens = (usage) => {
+  const n = Object.values(usage?.byModel ?? {}).reduce((acc, u) => acc + totalTokens(u), 0);
+  return n > 0 ? n : null;
+};
+
+const cancelEvent = (t, extra = {}) => ({ type: "run_end", exitCode: 130, status: "cancelled", ...extra, t });
+const cancelEvents = (t, usage, quota, mainModel) => [...usageEvents("orchestrator_usage", usage, t), cancelEvent(t, endFields({ quota, mainModel, usage }))];
 
 // Esc no dispara ningún hook: quien detecta la marca en el transcript (la statusline) cierra así.
-export function closeInterrupted(session, now, usage = null) {
+export function closeInterrupted(session, now, usage = null, quota = undefined) {
   if (!session.runId) return null;
-  return { runId: session.runId, events: cancelEvents(now, usage), session: { runId: null, lastRunId: session.runId, seq: session.seq } };
+  return { runId: session.runId, events: cancelEvents(now, usage, quota, session.mainModel), session: { runId: null, lastRunId: session.runId, seq: session.seq } };
 }
 
 // Gasto del orquestador en vivo: PostToolUse del orquestador, PreToolUse al delegar (Agent/Task) y SubagentStop,
@@ -116,7 +152,7 @@ export function liveAgentUsageDue(p, session, now) {
   return now - (session.agentUsage?.[p.agent_id]?.at ?? 0) >= LIVE_USAGE_MS;
 }
 
-// ctx: { profile, transcriptSize, interrupted, agentUsage, orchestratorUsage } — lo que el proceso del hook sabe leer del disco.
+// ctx: { profile, transcriptSize, interrupted, agentUsage, orchestratorUsage, directEdits } — lo que el proceso del hook sabe leer del disco.
 export function translateHook(p, session, now, makeRunId, ctx = {}) {
   const t = now;
   const open = session.runId;
@@ -129,16 +165,18 @@ export function translateHook(p, session, now, makeRunId, ctx = {}) {
       const ended = endedAgentsFrom(p.prompt).map((a) => ({ type: "task_end", taskId: a.taskId, status: a.status, source: "notification", t }));
       return ended.length ? { events: ended, session, runId: open } : none;
     }
-    const before = open ? { runId: open, events: cancelEvents(t, ctx.orchestratorUsage) } : undefined;
+    const before = open ? { runId: open, events: cancelEvents(t, ctx.orchestratorUsage, ctx.quota, session.mainModel) } : undefined;
     const seq = session.seq + 1;
     const runId = makeRunId(now, String(p.session_id ?? "sesion").slice(0, 8), seq);
-    const next = { runId, lastRunId: runId, seq };
+    const next = { runId, lastRunId: runId, seq, ...(ctx.mainModel && { mainModel: ctx.mainModel }) };
     if (ctx.transcriptSize != null) next.transcriptOffset = ctx.transcriptSize;
     const res = {
       runId,
       session: next,
-      events: [{ type: "run_start", runId, task: p.prompt ?? "", mode: "sesion", model: "opus", cwd: p.cwd ?? null, profile: ctx.profile ?? "trabajo", t }]
+      events: [{ type: "run_start", runId, task: p.prompt ?? "", mode: "sesion", model: "opus", cwd: p.cwd ?? null, profile: ctx.profile ?? "trabajo", ...(ctx.directEdits > 0 && { directEdits: ctx.directEdits }), ...(quotaSnapshot(ctx.quota) !== undefined && { quota: quotaSnapshot(ctx.quota) }), t }]
     };
+    // Etiqueta del orquestador desde el primer mensaje, sin esperar al primer hook en vivo.
+    if (ctx.mainModel) res.events.push({ type: "main_model", model: ctx.mainModel, t });
     if (before) res.before = before;
     // Solo al abrir ejecución: el proceso del hook lanza el clasificador en modo sombra con este prompt ya saneado.
     const shadowPrompt = sanitizePrompt(p.prompt).trim();
@@ -148,20 +186,32 @@ export function translateHook(p, session, now, makeRunId, ctx = {}) {
   if (!open) return none;
 
   // Al cerrar, el coste del orquestador va antes del run_end.
+  const mainModelEvents = () => (ctx.mainModel && ctx.mainModel !== session.mainModel ? [{ type: "main_model", model: ctx.mainModel, t }] : []);
   const close = (events) => {
     const end = events.findIndex((e) => e.type === "run_end");
-    const all = [...events.slice(0, end), ...usageEvents("orchestrator_usage", ctx.orchestratorUsage, t), ...events.slice(end)];
+    const fields = endFields({ quota: ctx.quota, mainModel: ctx.mainModel ?? session.mainModel, usage: ctx.orchestratorUsage });
+    const closing = events.slice(end).map((e) => (e.type === "run_end" ? { ...e, ...fields, t: e.t } : e));
+    const all = [...events.slice(0, end), ...mainModelEvents(), ...(ctx.contextEvents ?? []), ...usageEvents("orchestrator_usage", ctx.orchestratorUsage, t), ...closing];
     return { runId: open, session: { runId: null, lastRunId: open, seq: session.seq }, events: all };
   };
   // Con el estrangulado cumplido y datos leídos, la instantánea acumulada va al final y se recuerda cuándo y hasta dónde se leyó.
   const live = liveUsageDue(p, session, t) && ctx.orchestratorUsage;
+  const liveContext = liveUsageDue(p, session, t) && ctx.contextEvents?.length > 0;
   const liveAgent = liveAgentUsageDue(p, session, t) && ctx.agentLive?.usage;
-  const keep = (events) => {
+  const keep = (events, patch = null) => {
     let out = events;
-    let next = session;
+    let next = patch ? { ...session, ...patch } : session;
+    if (live || liveContext) {
+      const mm = mainModelEvents();
+      if (mm.length) { out = [...out, ...mm]; next = { ...next, mainModel: ctx.mainModel }; }
+    }
     if (live) {
       out = [...out, ...usageEvents("orchestrator_usage", ctx.orchestratorUsage, t)];
       next = { ...next, lastUsageAt: t, ...(ctx.usageState ? { usageState: ctx.usageState } : {}) };
+    }
+    if (liveContext) {
+      out = [...out, ...ctx.contextEvents];
+      next = { ...next, contextState: ctx.contextState };
     }
     if (liveAgent) {
       out = [...out, ...usageEvents("task_usage", ctx.agentLive.usage, t, { taskId: p.agent_id, snapshot: true })];
@@ -175,10 +225,12 @@ export function translateHook(p, session, now, makeRunId, ctx = {}) {
       if (p.agent_id) return keep([{ type: "tool", taskId: p.agent_id, name: p.tool_name, t }]);
       if (AGENT_TOOLS.has(p.tool_name)) {
         const i = p.tool_input ?? {};
+        const agent = i.subagent_type ?? "general-purpose";
+        const retry = retryInfo(session.requests, i.description, agent);
         return keep([{
-          type: "task_request", toolUseId: p.tool_use_id ?? null, agent: i.subagent_type ?? "general-purpose",
-          description: i.description ?? "", prompt: i.prompt ?? "", t
-        }]);
+          type: "task_request", toolUseId: p.tool_use_id ?? null, agent,
+          description: i.description ?? "", prompt: i.prompt ?? "", ...retry.fields, t
+        }], retry.requests ? { requests: retry.requests } : null);
       }
       const tool = { type: "tool", taskId: null, name: p.tool_name, t };
       if (p.tool_name === "AskUserQuestion") {
@@ -186,6 +238,8 @@ export function translateHook(p, session, now, makeRunId, ctx = {}) {
         return keep([tool, { type: "waiting", kind: "question", text: questions[0]?.question ?? "", questions, t }]);
       }
       if (p.tool_name === "ExitPlanMode") return keep([tool, { type: "waiting", kind: "plan", text: "Aprobar el plan", questions: [], t }]);
+      // Edición directa del orquestador: se cuenta por sesión (ctx.directEdits = las anteriores) para el dashboard.
+      if (isDirectEdit(p)) return keep([tool, { type: "direct_edit", name: p.tool_name, n: (ctx.directEdits ?? 0) + 1, t }]);
       return keep([tool]);
     }
     case "Notification": {
@@ -202,17 +256,37 @@ export function translateHook(p, session, now, makeRunId, ctx = {}) {
         toolUses: r.totalToolUseCount ?? null, durationMs: r.totalDurationMs ?? null, t
       }]);
     }
-    case "SubagentStart":
-      return keep([{ type: "task_start", taskId: p.agent_id, agent: p.agent_type ?? "general-purpose", description: "", prompt: "", t }]);
+    case "SubagentStart": {
+      // Un agente ya en marcha no se abre dos veces (hook repetido).
+      if (session.agents?.[p.agent_id]) return keep([]);
+      return keep(
+        [{ type: "task_start", taskId: p.agent_id, agent: p.agent_type ?? "general-purpose", description: "", prompt: "", model: ctx.agentModel ?? null, t }],
+        { agents: { ...(session.agents ?? {}), [p.agent_id]: { denied: false } } }
+      );
+    }
     case "SubagentStop": {
+      // Claude Code también lanza SubagentStop para sus agentes internos (resúmenes de progreso) y puede repetirlo:
+      // solo cierra un encargo que arrancó y sigue abierto. Sesiones sin registro de agentes (anteriores) pasan como antes.
+      if (session.agents && !session.agents[p.agent_id]) return keep([]);
+      const sum = ctx.agentSummary ?? {};
+      const denied = session.agents?.[p.agent_id]?.denied === true;
+      // Un permiso denegado no hace fallar el encargo por sí solo: el estado sale del final del transcript.
+      const status = sum.status ?? "completed";
+      const error = sum.error ?? null;
       // Lectura completa del transcript: sustituye a las instantáneas en vivo. El estado incremental ya no hace falta.
       const res = keep([
         ...usageEvents("task_usage", ctx.agentUsage, t, { taskId: p.agent_id, snapshot: true }),
         {
-          type: "task_end", taskId: p.agent_id, status: "completed", summary: short(p.last_assistant_message, 200),
-          result: short(p.last_assistant_message, RESULT_MAX), tokens: null, toolUses: null, durationMs: null, t
+          type: "task_end", taskId: p.agent_id, status, ...(error ? { error } : {}), ...(denied ? { permissionDenied: true } : {}), model: sum.model ?? null,
+          summary: short(p.last_assistant_message, 200), result: short(p.last_assistant_message, RESULT_MAX),
+          tokens: sum.tokens ?? agentTokens(ctx.agentUsage), toolUses: sum.toolUses ?? null, durationMs: sum.durationMs ?? null, t
         }
       ]);
+      if (res.session.agents) {
+        const rest = { ...res.session.agents };
+        delete rest[p.agent_id];
+        res.session = { ...res.session, agents: rest };
+      }
       if (res.session.agentUsage && p.agent_id in res.session.agentUsage) {
         const rest = { ...res.session.agentUsage };
         delete rest[p.agent_id];
@@ -220,18 +294,21 @@ export function translateHook(p, session, now, makeRunId, ctx = {}) {
       }
       return res;
     }
-    case "PermissionDenied":
-      return keep([{ type: "error", kind: "permission", message: `${p.tool_name ?? "Herramienta"} denegado`, t }]);
+    case "PermissionDenied": {
+      const ev = [{ type: "error", kind: "permission", message: `${p.tool_name ?? "Herramienta"} denegado`, t }];
+      const mine = p.agent_id ? session.agents?.[p.agent_id] : null;
+      return keep(ev, mine ? { agents: { ...session.agents, [p.agent_id]: { ...mine, denied: true } } } : null);
+    }
     case "Stop":
       // Tareas en segundo plano que no son subagentes del run (shells, monitores) no dejan la ejecución abierta:
       // sin subagentes en marcha la sesión queda parada esperando al usuario. Sin dato (ctx.runningTasks) se asume que sí hay.
       if ((p.background_tasks ?? []).length > 0 && (ctx.runningTasks ?? 1) > 0) return keep([{ type: "thinking", taskId: null, text: "", t }]);
-      return close([{ type: "run_end", exitCode: 0, t }]);
+      return close([{ type: "run_end", exitCode: 0, status: "completed", t }]);
     case "StopFailure": {
       const err = p.error === "rate_limit"
         ? { type: "error", kind: "limit", window: null, resetsAt: null, message: "Límite de uso alcanzado", t }
         : { type: "error", kind: "api", message: p.error_details ? `${p.error}: ${p.error_details}` : String(p.error ?? "error"), t };
-      return close([err, { type: "run_end", exitCode: 1, t }]);
+      return close([err, { type: "run_end", exitCode: 1, status: err.kind === "limit" ? "limited" : "failed", t }]);
     }
     case "SessionEnd":
       return close([{ type: "run_end", exitCode: 0, status: "cancelled", t }]);

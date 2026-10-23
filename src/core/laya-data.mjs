@@ -3,6 +3,7 @@
 import { createHash } from "node:crypto";
 import { CHOICES, buildLayaRequest, sanitizePrompt } from "./classifier.mjs";
 import { trainingLabel } from "./details.mjs";
+import { SEEDS } from "./laya-seeds.mjs";
 
 export const CSV_HEADER = "texto,etiqueta,perfil,fuente,runId";
 export const DEFAULT_EVAL_RATIO = 0.2;
@@ -25,6 +26,59 @@ export function trainingRows(runs, { profile = "todos" } = {}) {
   return rows.sort((a, b) => (a.runId < b.runId ? -1 : a.runId > b.runId ? 1 : 0));
 }
 
+// Una semilla sin etiqueta cuenta como opus (compatibilidad con las primeras semillas, que eran todas de opus).
+const DEFAULT_SEED_LABEL = "opus";
+const seedRow = (s) => ({ ...s, label: s.label ?? DEFAULT_SEED_LABEL, source: "semilla" });
+
+// Semillas locales (JSONL fuera del repo, una por línea {origin,label,text}): las líneas inválidas o con etiqueta fuera de CHOICES se saltan; sin etiqueta = opus.
+export function parseLocalSeeds(text) {
+  const out = [];
+  for (const line of String(text ?? "").split("\n")) {
+    if (!line.trim()) continue;
+    let r;
+    try { r = JSON.parse(line); } catch { continue; }
+    if (!r || typeof r.text !== "string" || !r.text.trim()) continue;
+    const label = r.label ?? DEFAULT_SEED_LABEL;
+    if (!CHOICES.includes(label)) continue;
+    out.push({ text: r.text, label, origin: typeof r.origin === "string" ? r.origin : "historico" });
+  }
+  return out;
+}
+
+// Clave de comparación de textos: sin mayúsculas ni espacios sobrantes.
+const textKey = (t) => String(t ?? "").trim().replace(/\s+/g, " ").toLowerCase();
+
+// Añade las semillas versionadas (src/core/laya-seeds.mjs) y las locales a las filas de entrenamiento, sin repetir textos
+// ni meter ninguna cuyo texto esté ya en la evaluación (evalRows).
+export function withSeeds(rows, local = [], evalRows = []) {
+  const seen = new Set([...(rows ?? []), ...(evalRows ?? [])].map((r) => textKey(r.text)));
+  const extra = [];
+  for (const s of [...SEEDS, ...local]) {
+    const k = textKey(s.text);
+    if (seen.has(k)) continue;
+    seen.add(k);
+    extra.push(seedRow(s));
+  }
+  return [...(rows ?? []), ...extra];
+}
+
+export const SEED_EVAL_RATIO = 0.25;
+
+// Reparte las semillas (versionadas + locales) entre train y eval según el hash del texto normalizado (~75/25, determinista).
+// Sin repetir textos de filas reales de ningún lado. Devuelve ambos conjuntos con las filas reales incluidas.
+export function addSeeds(trainRows, evalRows, local = [], ratio = SEED_EVAL_RATIO) {
+  const seen = new Set([...(trainRows ?? []), ...(evalRows ?? [])].map((r) => textKey(r.text)));
+  const train = [...(trainRows ?? [])];
+  const ev = [...(evalRows ?? [])];
+  for (const s of [...SEEDS, ...local]) {
+    const k = textKey(s.text);
+    if (seen.has(k)) continue;
+    seen.add(k);
+    (inEvalSet(k, ratio) ? ev : train).push(seedRow(s));
+  }
+  return { train, eval: ev };
+}
+
 export function csvField(value) {
   const s = String(value ?? "");
   return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
@@ -35,16 +89,16 @@ export function toCsv(rows) {
   return `${[CSV_HEADER, ...lines].join("\n")}\n`;
 }
 
-// Pertenece al conjunto de evaluación según un hash del runId: no cambia al llegar ejecuciones nuevas.
-export function inEvalSet(runId, ratio = DEFAULT_EVAL_RATIO) {
-  const h = createHash("sha256").update(String(runId)).digest().readUInt32BE(0) / 2 ** 32;
+// Pertenece al conjunto de evaluación según un hash de la clave (el texto normalizado en splitRows): no cambia al llegar ejecuciones nuevas.
+export function inEvalSet(key, ratio = DEFAULT_EVAL_RATIO) {
+  const h = createHash("sha256").update(String(key)).digest().readUInt32BE(0) / 2 ** 32;
   return h < ratio;
 }
 
 export function splitRows(rows, ratio = DEFAULT_EVAL_RATIO) {
   const train = [];
   const ev = [];
-  for (const r of rows ?? []) (inEvalSet(r.runId, ratio) ? ev : train).push(r);
+  for (const r of rows ?? []) (inEvalSet(r.text != null ? textKey(r.text) : r.runId, ratio) ? ev : train).push(r);
   return { train, eval: ev };
 }
 

@@ -73,14 +73,14 @@ try {
     .catch(async () => fail(`El contador no es "${needle}". Es: ${await page.evaluate(() => document.querySelector('[data-testid="training-count"]')?.textContent ?? "(no existe)")}`));
 
   // 1. Etiqueta automática: contador sin correcciones y botón del programador en "(auto)".
-  await waitCount("Datos para entrenar: 1 (0 corregidas) · asistente 0 · programador 1 · opus 0");
+  await waitCount("Datos para entrenar: 1 (0 corregidas) · asistente 0 · programador 1 · orquestador 0");
   await waitText("¿Quién debía llevarla?");
   await waitText("Programador (auto)");
   console.log("✓ etiqueta automática y contador");
 
   // 2. Pulsar Asistente: el POST añade el evento y el dashboard lo recibe por WebSocket.
   await page.click('button[data-label="asistente"]');
-  await waitCount("Datos para entrenar: 1 (1 corregida) · asistente 1 · programador 0 · opus 0");
+  await waitCount("Datos para entrenar: 1 (1 corregida) · asistente 1 · programador 0 · orquestador 0");
   const lines = (await readFile(join(home, "runs", `${RUN}.jsonl`), "utf8")).trim().split("\n").map((l) => JSON.parse(l));
   const ev = lines.at(-1);
   if (ev.type !== "route_label" || ev.label !== "asistente" || ev.source !== "usuario") fail(`Evento inesperado: ${JSON.stringify(ev)}`);
@@ -95,7 +95,7 @@ try {
 
   // 3. Deshacer vuelve a la automática.
   await page.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent === "Deshacer").click());
-  await waitCount("Datos para entrenar: 1 (0 corregidas) · asistente 0 · programador 1 · opus 0");
+  await waitCount("Datos para entrenar: 1 (0 corregidas) · asistente 0 · programador 1 · orquestador 0");
   console.log("✓ deshacer");
 
   // 4. Sin desbordamiento horizontal a 390 px.

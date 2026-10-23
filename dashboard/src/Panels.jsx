@@ -1,11 +1,11 @@
 import { useMemo, useState } from "react";
-import { fmtClock, fmtCost, fmtCostFine, fmtDuration, fmtTokens, fmtModel, fmtTokenTypes } from "./captions.js";
+import { fmtClock, fmtCost, fmtCostFine, fmtDuration, fmtTokens, fmtModel, fmtTokenTypes, orchestratorName, routeName } from "./captions.js";
 import { truncate } from "./packets.js";
 import WindowLine from "./WindowLine.jsx";
 import { useProfileLabel } from "./profiles.js";
 import { windowLine, savingsLines, shadowLines, quotaBadge } from "./compact.js";
 import { isStale } from "../../src/core/view.mjs";
-import { runContext, runBusy, contextAdvice, CONTEXT_HELP } from "../../src/core/compaction.mjs";
+import { runContext, runBusy, contextAdvice, CONTEXT_HELP, RELEVO_HELP } from "../../src/core/compaction.mjs";
 import { runTitle, promptParts, costBreakdown, shadowVerdict, trainingLabel, taskRows, isWaiting, groupRuns, filterRuns, filterTasks, classifierName } from "../../src/core/details.mjs";
 
 function Window({ kind, w, nowSec }) {
@@ -25,10 +25,9 @@ function SavingsBlock({ savings }) {
   );
 }
 
-const ROUTE_NAME = { asistente: "Asistente", programador: "Programador", opus: "Opus" };
 const ROUTES = ["asistente", "programador", "opus"];
 
-// Aciertos del clasificador frente a lo que hizo Opus: una línea y el resto plegado. Oculto sin ejecuciones comparables.
+// Aciertos del clasificador frente a lo que hizo el orquestador: una línea y el resto plegado. Oculto sin ejecuciones comparables.
 function ShadowBlock({ shadow }) {
   const l = shadowLines(shadow);
   if (!l) return null;
@@ -39,11 +38,11 @@ function ShadowBlock({ shadow }) {
         <summary>{l.summary}</summary>
         {l.detail.map((t, i) => <div key={i} className="qmeta" {...(t.startsWith("(no incluye") ? { "data-others": true } : t.startsWith("Datos para") ? { "data-testid": "training-count" } : {})}>{t}</div>)}
         <table className="smatrix">
-          <thead><tr><th>{shadow.name} \ real</th>{ROUTES.map((r) => <th key={r}>{ROUTE_NAME[r]}</th>)}</tr></thead>
+          <thead><tr><th>{shadow.name} \ real</th>{ROUTES.map((r) => <th key={r}>{routeName(r)}</th>)}</tr></thead>
           <tbody>
             {ROUTES.map((j) => (
               <tr key={j}>
-                <th>{ROUTE_NAME[j]}</th>
+                <th>{routeName(j)}</th>
                 {ROUTES.map((r) => <td key={r} className={j === r ? "diag" : ""}>{shadow.byPair[j]?.[r] ?? 0}</td>)}
               </tr>
             ))}
@@ -85,7 +84,7 @@ export function QuotaPanel({ quotas, now, savingsByProfile, shadowByProfile }) {
         );
       })}
       {entries.length > 0 ? (
-        <p className="note">{anySavings && "Estimado con precios de API; con suscripción no pagas por token. "}Opus delega más cuanto más alta está la cuota de su cuenta.</p>
+        <p className="note">{anySavings && "Estimado con precios de API; con suscripción no pagas por token. "}El orquestador delega más cuanto más alta está la cuota de su cuenta.</p>
       ) : (
         <p className="note">Aparece tras la primera respuesta en <code>co</code>, <code>cop</code> o <code>router</code>.</p>
       )}
@@ -95,8 +94,8 @@ export function QuotaPanel({ quotas, now, savingsByProfile, shadowByProfile }) {
 
 const RUN_DOT = { running: "ok pulse", completed: "ok", failed: "err", cancelled: "idle", limited: "err" };
 const RUN_TEXT = { running: "en curso", completed: "completada", failed: "falló", cancelled: "cancelada", limited: "límite" };
-const WAIT_TEXT = { question: "pregunta", permission: "permiso", plan: "plan" };
-export const waitText = (run) => WAIT_TEXT[run.waiting?.kind] ?? "pregunta";
+const WAIT_TEXT = { question: "espera respuesta", permission: "permiso", plan: "plan" };
+export const waitText = (run) => WAIT_TEXT[run.waiting?.kind] ?? "espera respuesta";
 
 // "~" marca el coste estimado a partir de los tokens; sin él, es el que informó Claude.
 function costMeta(r) {
@@ -207,10 +206,11 @@ export function HistoryPanel({ runs, selectedId, onSelect, now }) {
 const TASK_DOT = { running: "ok pulse", completed: "ok", failed: "err", killed: "err" };
 const TASK_TEXT = { running: "en curso", completed: "completado", failed: "falló", killed: "falló" };
 const ROLES = [
-  ["orchestrator", "Orquestador (Opus)"],
+  ["orchestrator", "Orquestador"],
   ["programador", "Programador (Sonnet)"],
   ["asistente", "Asistente (Haiku)"],
-  ["propio", "Subagentes propios (Explore…)"]
+  ["consultor", "Consultor (Opus)"],
+  ["propio", "Otros (Explore…)"]
 ];
 
 function Waiting({ run }) {
@@ -280,7 +280,7 @@ function LabelRow({ run }) {
           const auto = on && current.source === "auto";
           return (
             <button key={r} type="button" disabled={sending} aria-pressed={on} data-label={r} className={`${on ? "on" : ""} ${auto ? "auto" : ""}`} onClick={() => send(r)}>
-              {ROUTE_NAME[r]}{auto ? " (auto)" : ""}
+              {routeName(r, run)}{auto ? " (auto)" : ""}
             </button>
           );
         })}
@@ -307,8 +307,8 @@ function Shadow({ run }) {
         : (
           <div className="dshadow">
             <p className="sline">
-              {name} eligió: <b>{ROUTE_NAME[v.choice] ?? v.choice}</b>{v.confidence != null ? ` (${Math.round(v.confidence * 100)} %)` : ""}
-              {v.actual ? <> · Opus hizo: <b>{ROUTE_NAME[v.actual]}</b>{v.targetSource === "usuario" && v.target !== v.actual ? <> · tu etiqueta: <b>{ROUTE_NAME[v.target]}</b></> : null} → <span className={`stag ${v.match ? "ok" : "warn"}`}>{v.match ? "coincide" : "no coincide"}</span></> : <> · Opus aún no ha terminado</>}
+              {name} eligió: <b>{routeName(v.choice, run)}</b>{v.confidence != null ? ` (${Math.round(v.confidence * 100)} %)` : ""}
+              {v.actual ? <> · Real: <b>{routeName(v.actual, run)}</b>{v.targetSource === "usuario" && v.target !== v.actual ? <> · tu etiqueta: <b>{routeName(v.target, run)}</b></> : null} → <span className={`stag ${v.match ? "ok" : "warn"}`}>{v.match ? "coincide" : "no coincide"}</span></> : <> · {orchestratorName(run)} aún no ha terminado</>}
             </p>
             {v.reason && <p className="sreason">{v.reason}</p>}
             <p className="sreason">
@@ -327,14 +327,14 @@ function Shadow({ run }) {
   );
 }
 
-function Spend({ b }) {
-  const roles = ROLES.filter(([k]) => k !== "propio" || b[k].tokens > 0);
+function Spend({ b, run }) {
+  const roles = ROLES.filter(([k]) => !["consultor", "propio"].includes(k) || b[k].tokens > 0);
   const max = Math.max(...roles.map(([k]) => b[k].costUsd), 0.000001);
   return (
     <div className="dspend">
       {roles.map(([k, name]) => (
         <div key={k} className="srow" title={fmtTokenTypes(b[k].tokenTypes)}>
-          <span className="sname">{name}</span>
+          <span className="sname">{k === "orchestrator" && orchestratorName(run) !== "Orquestador" ? `Orquestador (${orchestratorName(run)})` : name}</span>
           <span className="sbar"><span style={{ transform: `scaleX(${b[k].costUsd / max})` }} /></span>
           <b>{fmtCost(b[k].costUsd)}</b>
           <span className="stok">{fmtTokens(b[k].tokens)} tok</span>
@@ -364,19 +364,20 @@ function Context({ run, b, now }) {
   const ctx = runContext(run);
   const c = b.compactions;
   if (!ctx && !c) return null;
-  const advice = ctx ? contextAdvice(ctx.pct, runBusy(run, now)) : null;
+  const advice = ctx ? contextAdvice(ctx.pct, runBusy(run, now), ctx.relevo) : null;
   return (
     <div className="dblock">
       <h4>Contexto y compactaciones</h4>
       {ctx && (
-        <div className={`ctxrow ${ctx.level}`}>
+        <div className={`ctxrow ${advice.level === "relevo" ? "relevo" : ctx.level}`}>
           <div className="qrow"><span>Contexto actual</span><b>{ctx.pct} %</b></div>
           <div className={`qbar ${ctx.level === "ok" ? "" : ctx.level === "warn" ? "warn" : "err"}`}><span style={{ transform: `scaleX(${Math.min(1, ctx.pct / 100)})` }} /></div>
           <div className="qmeta">
             {fmtTokens(ctx.tokens)} de {fmtTokens(ctx.limit ?? ctx.window)} tok{ctx.limit ? ` (autocompact; ventana ${fmtTokens(ctx.window)})` : ""}
           </div>
           {advice.text && <p className="ctxwarn">{advice.text[0].toUpperCase() + advice.text.slice(1)}</p>}
-          {advice.text && <p className="note">{CONTEXT_HELP}</p>}
+          {advice.text && advice.level !== "relevo" && <p className="note">{CONTEXT_HELP}</p>}
+          {advice.relevo && <p className="note">{RELEVO_HELP}</p>}
         </div>
       )}
       {c && (
@@ -403,11 +404,11 @@ function Context({ run, b, now }) {
 }
 
 const TASK_STATUS_OPTS = [["all", "Todos"], ["running", "En curso"], ["completed", "Completados"], ["failed", "Fallidos"]];
-const TASK_AGENT_OPTS = [["all", "Todos"], ["asistente", "Asistente"], ["programador", "Programador"], ["propio", "Propios"]];
+const TASK_AGENT_OPTS = [["all", "Todos"], ["asistente", "Asistente"], ["programador", "Programador"], ["consultor", "Consultor"], ["propio", "Otros"]];
 const NO_TASK_FILTER = { text: "", status: "all", agent: "all" };
 
 // Con key={run.id} desde el padre: al cambiar de ejecución los filtros se reinician.
-function Tasks({ rows }) {
+function Tasks({ rows, run }) {
   const [f, setF] = useState(NO_TASK_FILTER);
   const set = (patch) => setF((cur) => ({ ...cur, ...patch }));
   const done = rows.filter((r) => r.status === "completed").length;
@@ -416,7 +417,7 @@ function Tasks({ rows }) {
   return (
     <div className="dblock">
       <h4>Encargos <span className="count">{done} de {rows.length} completados{filtering ? ` · mostrando ${shown.length}` : ""}</span></h4>
-      {rows.length === 0 ? <p className="note">Opus no ha delegado nada todavía.</p> : (
+      {rows.length === 0 ? <p className="note">{orchestratorName(run)} no ha delegado nada todavía.</p> : (
         <>
           <div className="filters">
             <SearchBox value={f.text} onChange={(text) => set({ text })} label="Buscar encargos" placeholder="Buscar en descripción, encargo y resultado" />
@@ -505,14 +506,14 @@ export function DetailPanel({ run, now }) {
 
       <div className="dblock">
         <h4>Gasto</h4>
-        {b.hasData ? <Spend b={b} /> : <p className="note">Esta ejecución no tiene datos de uso.</p>}
+        {b.hasData ? <Spend b={b} run={run} /> : <p className="note">Esta ejecución no tiene datos de uso.</p>}
       </div>
 
       <Context run={run} b={b} now={now} />
 
       <Shadow run={run} />
 
-      <Tasks key={run.id} rows={rows} />
+      <Tasks key={run.id} rows={rows} run={run} />
     </section>
   );
 }

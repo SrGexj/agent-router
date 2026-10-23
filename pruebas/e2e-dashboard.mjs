@@ -5,6 +5,7 @@
 //   npm run e2e              (o: node pruebas/e2e-dashboard.mjs)
 //   E2E_SHOT=/ruta/detalle.png npm run e2e   (además guarda una captura del panel Detalle)
 //   E2E_SHOT_SCENE=/ruta/terminada.png npm run e2e   (captura de la escena de una ejecución terminada)
+//   E2E_SHOT_CUATRO=/ruta/cuatro.png npm run e2e   (escena con los cuatro nodos a 1280 y 390 px; guarda cuatro-1280.png y cuatro-390.png)
 //   E2E_SHOT_LAYA=/ruta/escena-laya.png E2E_SHOT_LAYA_390=/ruta/escena-laya-390.png npm run e2e   (escena en curso con el nodo Laya, a 1280 y a 390 px)
 //   E2E_SHOT_PERFILES=/ruta/perfiles.png npm run e2e   (captura del panel Cuota con ahorro y sombra por cuenta, a 390 px)
 //   E2E_SHOT_SHADOW=/ruta/sombra.png npm run e2e   (captura de la página con el modo sombra)
@@ -94,14 +95,13 @@ try {
   };
 
   // 1. Sin ejecuciones: en espera, con la red completa y quieta.
-  await waitText("EN ESPERA");
-  for (const t of ["Tú", "Orquestador", "Asistente", "Programador", "Recibe", "Entrega", "En espera", "Aún no hay ejecuciones"]) await waitText(t);
+  await waitText("Aún no hay ejecuciones");
+  for (const t of ["Tú", "Orquestador", "Asistente", "Programador", "Consultor", "Otros", "Recibe", "Entrega", "En espera", "Aún no hay ejecuciones"]) await waitText(t);
   console.log("✓ en espera");
 
   // 2. Una ejecución real del router (con claude falso) aparece en vivo.
   const router = spawn("node", [join(ROOT, "bin/router.mjs"), "Tarea de prueba e2e"], { cwd: home, env, stdio: ["ignore", "pipe", "pipe"] });
   children.push(router);
-  await waitText("EN VIVO");
   await waitText("Tarea de prueba e2e");
   await page.waitForSelector(".run-pill.on", { timeout: 5000 }).catch(() => fail("No aparece la pastilla de la ejecución en curso"));
   console.log("✓ ejecución en vivo con su pastilla");
@@ -123,7 +123,7 @@ try {
   await page.evaluate(() => { window.__now = Date.now; Date.now = () => window.__now() + 600_000; });
   await page.evaluate(() => new Promise((r) => setTimeout(r, 400)));
   const kept = await page.$eval(".card", (el) => el.innerText);
-  for (const t of ["HISTORIAL", "Terminada", "Haiku 5.5 · 1 encargo", "0,21 $"]) {
+  for (const t of ["historial", "Terminada", "Haiku 5.5 · 1 encargo", "0,21 $"]) {
     if (!kept.includes(t)) fail(`La escena terminada pierde "${t}" pasado el tiempo:\n${kept}`);
   }
   if (kept.includes("EN ESPERA") || kept.includes("Libre")) fail(`La escena terminada vuelve a reposo:\n${kept}`);
@@ -169,8 +169,8 @@ try {
   if (page0.includes("<pasted_content")) fail("El título deja ver la etiqueta <pasted_content");
   const runsText = await page.$eval(".runs", (el) => el.innerText);
   if (!runsText.includes("[texto pegado] Retoma el trabajo de ayer")) fail(`Título de la lista sin limpiar:\n${runsText}`);
-  if (!/pregunta/.test(runsText)) fail("La lista no marca la ejecución como pregunta");
-  await page.waitForFunction(() => document.querySelector(".run-pill.waiting, .run-pill.on")?.innerText.includes("pregunta"), { timeout: 5000 }).catch(() => fail("La pastilla no avisa de la pregunta"));
+  if (!/espera respuesta/.test(runsText)) fail("La lista no marca la ejecución como pregunta");
+  await page.waitForFunction(() => document.querySelector(".run-pill.waiting, .run-pill.on")?.innerText.includes("espera respuesta"), { timeout: 5000 }).catch(() => fail("La pastilla no avisa de la pregunta"));
   const share = await page.$eval(".split", (el) => el.innerText);
   if (!/gasto/i.test(share) || /—/.test(share)) fail(`La barra de gasto no refleja los datos de uso:\n${share}`);
   console.log("✓ detalle: título limpio, pregunta, encargos y gasto");
@@ -334,12 +334,12 @@ try {
     };
     await open("Sombra no coincide");
     const noMatch = await page.$eval(".detail", (el) => el.innerText);
-    for (const t of ["Clasificador en sombra (Jev)", "Jev eligió: Asistente (85 %)", "Opus hizo: Programador", "no coincide", "Cambio mecánico de texto", "Latencia 0,6 s", "Si se le hubiera hecho caso", "ahorro", "estimación"]) {
+    for (const t of ["Clasificador en sombra (Jev)", "Jev eligió: Asistente (85 %)", "Real: Programador", "no coincide", "Cambio mecánico de texto", "Latencia 0,6 s", "Si se le hubiera hecho caso", "ahorro", "estimación"]) {
       if (!noMatch.includes(t)) fail(`Falta "${t}" en el bloque de sombra:\n${noMatch}`);
     }
     await open("Sombra coincide");
     const match = await page.$eval(".detail", (el) => el.innerText);
-    if (!match.includes("Jev eligió: Opus (92 %)") || !/Opus hizo: Opus\s*→\s*coincide/.test(match)) fail(`Bloque de sombra sin coincidencia:\n${match}`);
+    if (!match.includes("Jev eligió: Orquestador (Opus) (92 %)") || !/Real: Orquestador \(Opus\)\s*→\s*coincide/.test(match)) fail(`Bloque de sombra sin coincidencia:\n${match}`);
     await open("Sombra con error");
     const err = await page.$eval(".detail", (el) => el.innerText);
     if (!err.includes("timeout") || err.includes("Jev eligió")) fail(`Bloque de sombra con error incorrecto:\n${err}`);
@@ -426,6 +426,7 @@ try {
       { type: "task_usage", taskId: "b", byModel: { "claude-haiku-5-5": { input: Mi, output: 0, cacheRead: 0, cacheWrite5m: 0, cacheWrite1h: 0 } }, t: t + 3300 },
       { type: "task_end", taskId: "b", status: "failed", summary: "", t: t + 4000 },
       { type: "orchestrator_usage", byModel: { "claude-opus-5-5": { input: 100_000, output: 50_000, cacheRead: 0, cacheWrite5m: 0, cacheWrite1h: 0 } }, t: t + 5000 },
+      { type: "context", tokens: 189_300, model: "claude-opus-5-5", window: Mi, t: t + 5100 },
       { type: "run_end", status: "done", exitCode: 0, t: t + 190_000 }
     ];
     await writeFile(join(home, "runs", "final-1.jsonl"), ev.map((e) => JSON.stringify(e)).join("\n") + "\n");
@@ -433,19 +434,56 @@ try {
     // La ejecución llega por el socket en cuanto el servidor lee el archivo: puede aparecer en la lista a medias y recolocarse
     // (En curso -> Terminadas) al llegar el resto. Se repite el clic hasta que la vista cambie, en vez de fiarlo a un solo clic.
     await page.waitForFunction(() => {
-      if (document.querySelector(".badge em")?.textContent === "final-1") return true;
+      if (document.querySelector(".runs button.sel .rtask")?.textContent === "Resumen final de gasto") return true;
       [...document.querySelectorAll(".runs .rtask")].find((e) => e.textContent === "Resumen final de gasto")?.closest("button").click();
       return false;
-    }, { timeout: 10_000, polling: 250 }).catch(async () => fail(`No se selecciona final-1. badge=${await page.$eval(".badge", (e) => e.outerHTML)} sel=${await page.$$eval(".runs button.sel .rtask", (e) => e.map((x) => x.textContent))}`));
+    }, { timeout: 10_000, polling: 250 }).catch(async () => fail(`No se selecciona final-1. sel=${await page.$$eval(".runs button.sel .rtask", (e) => e.map((x) => x.textContent))}`));
     // Y a que el archivo se haya leído entero (si se eligió a medias, la escena aún no trae el resumen).
     await page.waitForFunction(() => document.querySelector(".card")?.innerText.includes("2 encargos · 4,50 $"), { timeout: 10_000 }).catch(() => {});
     await page.evaluate(() => new Promise((r) => setTimeout(r, 200)));
     const card = await page.$eval(".card", (el) => el.innerText);
-    for (const x of ["Opus · 1,40 $ · 150 k tok", "Sonnet 5.5 · 1 encargo · 3,00 $ · 1,1 M tok", "Haiku 5.5 · 1 encargo · 0,10 $ · 1 M tok", "2 encargos · 4,50 $ · 2,3 M tok · 3 min 10 s"]) {
+    for (const x of ["Sonnet 5.5 · 1 encargo · 3,00 $ · 1,1 M tok", "Haiku 5.5 · 1 encargo · 0,10 $ · 1 M tok", "2 encargos · 4,50 $ · 2,3 M tok · 3 min 10 s", "GASTO", "USO", "CONTEXTO", "75 % · 189,3 k / 250 k"]) {
       if (!card.includes(x)) fail(`Falta "${x}" en la escena terminada:\n${card}`);
     }
     if (process.env.E2E_SHOT_SCENE) await (await page.$(".card")).screenshot({ path: process.env.E2E_SHOT_SCENE });
     console.log("✓ resumen final en la escena: nodos y caption");
+  }
+
+  // 7d1. Cuatro trabajadores: consultor (Opus) y el nodo "Otros" (Explore, Plan...) con su contador y los tipos en el tooltip.
+  {
+    const t = Date.now() - 300_000;
+    const ev = [
+      { type: "run_start", runId: "cuatro-1", task: "Escena con cuatro nodos", mode: "sesion", model: "opus", cwd: "/tmp/p", t },
+      { type: "task_start", taskId: "k", agent: "consultor", description: "Valorar el diseño", prompt: "", t: t + 1000 },
+      { type: "task_model", taskId: "k", model: "claude-opus-5-5", t: t + 1100 },
+      { type: "task_end", taskId: "k", status: "completed", summary: "", t: t + 2000 },
+      { type: "task_start", taskId: "x1", agent: "Explore", description: "Buscar", prompt: "", t: t + 2100 },
+      { type: "task_start", taskId: "x2", agent: "Plan", description: "Planificar", prompt: "", t: t + 2200 },
+      { type: "task_end", taskId: "x1", status: "completed", summary: "", t: t + 3000 },
+      { type: "task_end", taskId: "x2", status: "completed", summary: "", t: t + 3100 },
+      { type: "run_end", status: "done", exitCode: 0, t: t + 4000 }
+    ];
+    await writeFile(join(home, "runs", "cuatro-1.jsonl"), ev.map((e) => JSON.stringify(e)).join("\n") + "\n");
+    await waitText("Escena con cuatro nodos");
+    await page.setViewport({ width: 1280, height: 1100 });
+    await page.waitForFunction(() => {
+      if (document.querySelector(".runs button.sel .rtask")?.textContent === "Escena con cuatro nodos") return true;
+      [...document.querySelectorAll(".runs .rtask")].find((e) => e.textContent === "Escena con cuatro nodos")?.closest("button").click();
+      return false;
+    }, { timeout: 10_000, polling: 250 }).catch(() => fail("No se selecciona cuatro-1"));
+    await page.waitForFunction(() => document.querySelector(".scene")?.innerText.includes("OK 2/2"), { timeout: 10_000 }).catch(async () => fail(`Falta el contador "OK 2/2" del nodo Otros:\n${await page.$eval(".scene", (e) => e.innerText)}`));
+    const sc = await page.$eval(".scene", (el) => el.innerText);
+    for (const x of ["Consultor", "Opus 5.5 · 1 encargo", "Otros", "OK 1/1"]) if (!sc.includes(x)) fail(`Falta "${x}" en la escena de cuatro nodos:\n${sc}`);
+    const tip = await page.$$eval(".scene .lbl.side span[title]", (els) => els.map((e) => e.title).find((x) => x.includes("Explore")) ?? "");
+    if (!tip.includes("Explore") || !tip.includes("Plan")) fail(`El tooltip de Otros no lista los tipos: "${tip}"`);
+    for (const w of [1280, 390]) {
+      await page.setViewport({ width: w, height: 1100 });
+      const wide = await page.evaluate(() => [...document.querySelectorAll(".scene *")].filter((e) => e.closest(".scene-scroll") && !e.closest("svg") && e.getBoundingClientRect().right > e.closest(".scene").getBoundingClientRect().right + 2).length);
+      if (wide > 0) fail(`${wide} etiquetas de la escena se salen de su caja a ${w} px`);
+      if (process.env.E2E_SHOT_CUATRO) await (await page.$(".card")).screenshot({ path: process.env.E2E_SHOT_CUATRO.replace(/\.png$/, `-${w}.png`) });
+    }
+    await page.setViewport({ width: 1280, height: 1100 });
+    console.log("✓ escena con cuatro nodos: consultor, Otros con contador y tipos");
   }
 
   // 7d2. Gasto del orquestador en vivo y nodo Laya: en curso sin uso, con instantánea intermedia y ya terminada.
@@ -460,7 +498,7 @@ try {
     await waitText("Escena con Laya en vivo");
     await page.setViewport({ width: 1280, height: 1100 });
     await page.$$eval(".runs .rtask", (els) => els.find((e) => e.textContent === "Escena con Laya en vivo").closest("button").click());
-    await page.waitForFunction(() => document.querySelector(".badge em")?.textContent === "laya-1", { timeout: 5000 });
+    await page.waitForFunction(() => document.querySelector(".runs button.sel .rtask")?.textContent === "Escena con Laya en vivo", { timeout: 5000 });
     const scene = () => page.$eval(".scene", (el) => el.innerText);
     const waitScene = (needle) => page.waitForFunction((n) => document.querySelector(".scene")?.innerText.includes(n), { timeout: 8000 }, needle)
       .catch(async () => fail(`No aparece "${needle}" en la escena:\n${await scene()}`));
@@ -479,6 +517,11 @@ try {
     if (live.includes("se calcula en vivo") || live.includes("Consultando")) fail(`Con datos la escena no debe seguir pidiendo espera:\n${live}`);
     for (const x of ["Laya", "sombra", "Opus 100%"]) if (!live.replace(/\s+/g, " ").toLowerCase().includes(x.toLowerCase())) fail(`Falta "${x}" en la escena en curso:\n${live}`);
     if (live.includes("coincide")) fail("Mientras la ejecución sigue en curso no hay veredicto");
+    // Ediciones directas del orquestador: fila discreta al final de la tarjeta, oculta con 0.
+    if ((await page.$eval(".split", (el) => el.innerText)).includes("ediciones directas")) fail("Sin ediciones directas no debe haber fila");
+    await appendFile(file, jsonl([{ type: "direct_edit", n: 2, t: t + 600 }]));
+    await page.waitForFunction(() => document.querySelector(".split .gauge-direct")?.textContent === "ediciones directas: 2", { timeout: 8000 })
+      .catch(async () => fail(`Falta "ediciones directas: 2" dentro de la tarjeta:\n${await scene()}`));
     const snap = async (path, width) => {
       await page.setViewport({ width, height: 1100 });
       await page.evaluate(() => new Promise((r) => setTimeout(r, 250)));

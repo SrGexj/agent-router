@@ -89,8 +89,9 @@ export function costShare(run) {
   for (const id of run.taskOrder) {
     const node = run.tasks[id].node;
     if (node === "asistente") counts.haiku += 1;
+    else if (node === "consultor") counts.opus += 1;
     else if (node !== "propio") counts.sonnet += 1;
   }
-  if (counts.sonnet + counts.haiku === 0) return { opus: 0, sonnet: 0, haiku: 0, source: null };
+  if (counts.opus + counts.sonnet + counts.haiku === 0) return { opus: 0, sonnet: 0, haiku: 0, source: null };
   return { ...toPercents(counts), source: "encargos" };
 }

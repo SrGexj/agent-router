@@ -23,11 +23,11 @@ export function sanitizePrompt(text) {
 const ROUTE_QUESTIONS = {
   route: {
     type: "choice",
-    instructions: "¿Quién debe llevar esta tarea de programación?",
+    instructions: "¿Qué modelo debe llevar esta tarea: el más capaz para planificar, diseñar o valorar riesgos, o uno menor para ejecutar lo ya decidido?",
     criteria: {
       asistente: "Basta un modelo pequeño (Haiku): encargo acotado con criterio claro de bien/mal, como pasar tests y reportar, cambios de texto o documentación, renombrar, comprobar salidas.",
-      programador: "Un modelo medio (Sonnet): escribir código ya decidido, arreglar bugs concretos, refactors localizados.",
-      opus: "Hace falta el modelo más capaz (Opus): arquitectura, decisiones de producto, piezas delicadas (autenticación, cifrado, migraciones, borrados), tareas ambiguas, conversación o planificación."
+      programador: "Un modelo medio (Sonnet): escribir código ya decidido, arreglar bugs concretos, refactors localizados. Si falta decidir el enfoque, no es para él.",
+      opus: "Hace falta el modelo más capaz (Opus): planificar (más de 3 pasos o varias piezas), diseño y arquitectura, decisiones de producto, valorar riesgos (seguridad, datos, migraciones, rendimiento), revisión delicada de un cambio (autenticación, cifrado, borrados) y tareas ambiguas o abiertas."
     }
   }
 };
@@ -63,6 +63,7 @@ export function parseClassifierResponse(json) {
 }
 
 // POST JSON con timeout. Los fallos de transporte salen con `netMsg` (sin detalles: nunca el cuerpo, el prompt ni la clave).
+// El error lleva `errorKind`: "timeout" (abortado por tiempo) o "connection" (cualquier otro fallo de transporte).
 async function postJson({ url, headers = {}, body, fetch, timeoutMs, netMsg }) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
@@ -70,14 +71,19 @@ async function postJson({ url, headers = {}, body, fetch, timeoutMs, netMsg }) {
   try {
     res = await fetch(url, { method: "POST", headers: { ...headers, "Content-Type": "application/json" }, body: JSON.stringify(body), signal: ctrl.signal });
   } catch (e) {
-    throw new Error(netMsg(e), { cause: e });
+    throw Object.assign(new Error(netMsg(e), { cause: e }), { errorKind: e?.name === "AbortError" ? "timeout" : "connection" });
   } finally { clearTimeout(timer); }
   return res;
 }
 
 async function readJson(res) {
-  try { return await res.json(); } catch (e) { throw new Error("JSON no válido", { cause: e }); }
+  try { return await res.json(); } catch (e) { throw Object.assign(new Error("JSON no válido", { cause: e }), { errorKind: "parse" }); }
 }
+
+// Respuesta sin elección válida: error de contenido (errorKind "parse").
+const parseClassifier = (json) => {
+  try { return parseClassifierResponse(json); } catch (e) { throw Object.assign(e, { errorKind: "parse" }); }
+};
 
 export function createOpenRouterClassifier({ apiKey, model, fetch, now = Date.now, timeoutMs = 15000 }) {
   async function classify(prompt) {
@@ -86,8 +92,8 @@ export function createOpenRouterClassifier({ apiKey, model, fetch, now = Date.no
       url: DECISIONS_URL, headers: { Authorization: `Bearer ${apiKey}` }, body: buildClassifierRequest(prompt, model), fetch, timeoutMs,
       netMsg: (e) => (e?.name === "AbortError" ? `timeout ${timeoutMs} ms` : "red")
     });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const parsed = parseClassifierResponse(await readJson(res));
+    if (!res.ok) throw Object.assign(new Error(`HTTP ${res.status}`), { errorKind: "http" });
+    const parsed = parseClassifier(await readJson(res));
     const costUsd = parsed.costUsd ?? costOf(PRICING_MODEL, { input: parsed.usage.input, output: parsed.usage.output, cacheRead: 0, cacheWrite5m: 0, cacheWrite1h: 0 });
     return { ...parsed, costUsd, latencyMs: now() - t0 };
   }
@@ -101,11 +107,11 @@ export function createLayaClassifier({ url, fetch, now = Date.now, timeoutMs = L
   async function classify(prompt) {
     const t0 = now();
     const res = await postJson({ url, body: buildLayaRequest(prompt, model), fetch, timeoutMs, netMsg: () => "laya no disponible" });
-    if (!res.ok) throw res.status >= 500 ? down() : new Error(`HTTP ${res.status}`);
-    const parsed = parseClassifierResponse(await readJson(res));
+    if (!res.ok) throw Object.assign(res.status >= 500 ? down() : new Error(`HTTP ${res.status}`), { errorKind: "http" });
+    const parsed = parseClassifier(await readJson(res));
     return { ...parsed, costUsd: 0, model, latencyMs: now() - t0 };
   }
-  return { classify };
+  return { classify, model };
 }
 
 // Elige el proveedor según la config. null = no hay con qué clasificar (p. ej. Jev sin clave).

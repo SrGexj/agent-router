@@ -47,27 +47,36 @@ const familyName = (model) => {
   return m ? `${m[1][0].toUpperCase()}${m[1].slice(1).toLowerCase()}` : null;
 };
 
-// Bajo el orquestador: "Opus · 1,40 $ · 150 k tok". null sin datos de uso suyos.
+// Nombre del orquestador en textos: el modelo realmente elegido (co --model sonnet), nunca un "Opus" fijo.
+export const orchestratorName = (run) => familyName(run?.mainModel) ?? (run ? familyName(costBreakdown(run).orchestrator.models[0]) : null) ?? "Orquestador";
+
+// Bajo el orquestador: solo el modelo ("Sonnet", "Opus"...); coste y tokens van en la tarjeta de gasto/uso. null sin datos de uso suyos.
 export function orchestratorSub(run) {
   const o = costBreakdown(run).orchestrator;
-  if (o.tokens <= 0) return null;
-  return [familyName(o.models[0]) ?? "Opus", fmtCost(o.costUsd), `${fmtTokens(o.tokens)} tok`].join(" · ");
+  if (o.tokens <= 0) return familyName(run?.mainModel); // sin uso aún: el modelo real que anotó el hook (co --model sonnet)
+  return familyName(run?.mainModel) ?? familyName(o.models[0]) ?? "Orquestador";
 }
 
-// Bajo el orquestador: sus subagentes propios (Explore, general-purpose, Plan...), que no van a los nodos de rol.
-// "+1 Explore en curso" mientras trabajan (varios tipos: "+3 subagentes en curso") y "subagentes: N" al acabar.
-export function ownSubagentsLine(run) {
-  const own = tasksOf(run).filter((t) => t.node === "propio");
-  if (own.length === 0) return null;
-  const running = own.filter((t) => t.status === "running");
-  if (running.length === 0) return `subagentes: ${own.length}`;
-  const types = [...new Set(running.map((t) => t.agent))];
-  return `+${running.length} ${types.length === 1 ? types[0] : "subagentes"} en curso`;
+// Nodo "Otros": tipos de subagente que no son del equipo (Explore, Plan, general-purpose...) con cuántos hubo de cada uno,
+// para el tooltip: "Explore ×2, Plan". null sin ninguno.
+export function ownTypes(run) {
+  const counts = new Map();
+  for (const t of tasksOf(run).filter((t) => t.node === "propio")) counts.set(t.agent, (counts.get(t.agent) ?? 0) + 1);
+  if (counts.size === 0) return null;
+  return [...counts].map(([agent, n]) => (n > 1 ? `${agent} ×${n}` : agent)).join(", ");
 }
 
 // Tras este tiempo sin respuesta de Laya en una ejecución en curso se deja de esperarla (sombra desactivada o caída).
 export const LAYA_WAIT_MS = 30_000;
-const ROUTE_NAME = { asistente: "Asistente", programador: "Programador", opus: "Opus" };
+const ROUTE_NAME = { asistente: "Asistente", programador: "Programador" };
+
+// Nombre de una ruta en la UI. La clave interna "opus" (datos guardados y clasificador) significa "lo lleva el propio
+// orquestador, sin delegar": se muestra con el modelo real (co --model sonnet) y no como "Opus".
+export function routeName(route, run) {
+  if (route !== "opus") return ROUTE_NAME[route] ?? route;
+  const name = orchestratorName(run);
+  return name === "Orquestador" ? name : `Orquestador (${name})`;
+}
 
 // Nodo "Laya (sombra)" de la escena: null = no se pinta (demo, router CLI, ejecuciones sin shadow).
 // Solo las sesiones co lanzan el clasificador, así que ahí es donde tiene sentido esperarlo.
@@ -83,7 +92,7 @@ export function layaNode(run, now) {
   if (sh.error || !v.choice) {
     return { text: "sin respuesta", dot: "warn", title: sh.error ? `Laya: ${sh.error}` : "Laya no devolvió ninguna elección", verdict: null };
   }
-  const name = ROUTE_NAME[v.choice] ?? v.choice;
+  const name = routeName(v.choice, run);
   const text = v.confidence == null ? name : `${name} ${Math.round(v.confidence * 100)} %`;
   const title = [`Laya habría elegido ${name.toLowerCase()}`, sh.reason].filter(Boolean).join(": ");
   let verdict = null;
@@ -108,7 +117,8 @@ export function workerSub(run, node, fallback) {
   if (v.total === 0) return run?.endedAt != null ? fallback : `${fallback} · sin encargos`; // terminada: el pill ya dice "Sin encargos"
   const part = costBreakdown(run)[node];
   const tokens = part.tokens || v.tokens;
-  const parts = [fmtModel(v.model ?? "") === "—" ? fallback : fmtModel(v.model), plural(v.total, "encargo", "encargos")];
+  const model = fmtModel(v.model || null);
+  const parts = [model === "—" ? fallback : model, plural(v.total, "encargo", "encargos")];
   if (part.costUsd > 0) parts.push(fmtCost(part.costUsd));
   if (tokens) parts.push(`${fmtTokens(tokens)} tok`);
   return parts.join(" · ");
@@ -121,24 +131,26 @@ export function captionFor(phase, run, now) {
 
   if (run?.status === "running" && run.waiting && !["fallo", "limitado", "entrega"].includes(phase)) {
     const what = { question: "una pregunta", permission: "un permiso", plan: "la aprobación de un plan" }[run.waiting.kind] ?? "tu respuesta";
-    return { title: "Esperando tu respuesta", text: `Opus necesita ${what}: respóndela en la terminal.`, tone: "normal" };
+    return { title: "Esperando tu respuesta", text: `${orchestratorName(run)} necesita ${what}: respóndela en la terminal.`, tone: "normal" };
   }
 
   switch (phase) {
     case "reposo":
-      return { title: "En espera", text: "Abre una sesión con co (o lanza router \"…\") y Opus repartirá el trabajo entre el equipo.", tone: "normal" };
+      return { title: "En espera", text: "Abre una sesión con co (o lanza router \"…\") y el orquestador repartirá el trabajo entre el equipo.", tone: "normal" };
     case "recibe":
       return { title: "Tarea recibida", text: run.task, tone: "normal" };
     case "analiza":
-      return { title: "Opus analiza", text: "Lee el contexto y decide qué hace él y qué delega.", tone: "normal" };
+      return { title: `${orchestratorName(run)} analiza`, text: "Lee el contexto y decide qué hace él y qué delega.", tone: "normal" };
     case "delega": {
       const p = tasks.filter((t) => t.node === "programador").length;
       const a = tasks.filter((t) => t.node === "asistente").length;
-      const o = tasks.length - p - a;
+      const k = tasks.filter((t) => t.node === "consultor").length;
+      const o = tasks.length - p - a - k;
       const parts = [];
       if (p) parts.push(`${p} a Programador (Sonnet)`);
       if (a) parts.push(`${a} a Asistente (Haiku)`);
-      if (o) parts.push(`${o} ${o === 1 ? "subagente propio" : "subagentes propios"} de Opus`);
+      if (k) parts.push(`${k} a Consultor (Opus)`);
+      if (o) parts.push(`${o} ${o === 1 ? "subagente propio" : "subagentes propios"} de ${orchestratorName(run)}`);
       return { title: "Reparto", text: `${plural(tasks.length, "encargo", "encargos")}: ${parts.join(" y ")}.`, tone: "normal" };
     }
     case "ejecuta":
@@ -151,8 +163,8 @@ export function captionFor(phase, run, now) {
       return {
         title: "Revisión",
         text: failed.length
-          ? `Opus revisa los resultados; ${plural(failed.length, "encargo falló", "encargos fallaron")} y decide si reintentar.`
-          : "Opus comprueba los resultados antes de darlos por buenos.",
+          ? `${orchestratorName(run)} revisa los resultados; ${plural(failed.length, "encargo falló", "encargos fallaron")} y decide si reintentar.`
+          : `${orchestratorName(run)} comprueba los resultados antes de darlos por buenos.`,
         tone: "normal"
       };
     case "entrega":

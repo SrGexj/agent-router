@@ -36,10 +36,10 @@ Después abre una terminal nueva y usa `co`.
 
 El instalador:
 
-- Construye el dashboard si falta (`dashboard/dist`).
+- Crea la copia estable `~/.agent-router/app` (ver "Copia estable") y deja ahí el dashboard construido.
 - Escribe los hooks y la statusline de `co` en `~/.agent-router/co-settings.json`.
 - Mantiene tu statusline: su comando se guarda en `~/.agent-router/statusline-next` y se sigue mostrando en `co`.
-- Enlaza `asistente.md` y `programador.md` en `~/.claude/agents`. No pisa los que ya existan.
+- Enlaza `asistente.md`, `programador.md` y `consultor.md` en `~/.claude/agents`. No pisa los que ya existan.
 - Enlaza `~/bin/router` (debe estar en tu PATH).
 - Añade la función `co` al rc del shell (`~/.zshrc` en macOS; `~/.zshrc` o `~/.bashrc` en Linux). Antes guarda una copia en `~/.agent-router/`.
 - Instala el dashboard como servicio (`com.agent-router.server`) en http://127.0.0.1:4317, siempre activo.
@@ -49,6 +49,14 @@ Avisos:
 
 - Reinstalar reinicia el servicio del dashboard y corta las sesiones `co` que estén en curso.
 - Si cambias de versión de Node con nvm, vuelve a ejecutar `npm run instalar`: el servicio usa la ruta del Node con el que se instaló.
+
+## Copia estable
+
+Los hooks, la statusline, el servicio del dashboard, los enlaces de los agentes y `~/bin/router` no apuntan a este repo sino a `~/.agent-router/app`: un `git worktree` de `main` en HEAD desatado, con sus `node_modules` de producción y el `dashboard/dist` ya construido. Así, cambiar de rama o dejar un merge a medias aquí no rompe las sesiones `co` y `cop` en marcha (las dos usan el mismo `co-settings.json` y la misma copia).
+
+- Actualizar a `origin/main` (hace `git fetch origin`; sin red usa el `main` local y avisa): `router actualizar` (o `npm run instalar -- --actualizar`). Mueve la copia, reconstruye y reinicia el dashboard.
+- No edites nada dentro de `~/.agent-router/app`: si tiene cambios sin confirmar, la actualización y la desinstalación paran y avisan.
+- Las sesiones `co` ya abiertas siguen con la copia anterior hasta que las cierres.
 
 ## Desinstalación
 
@@ -60,7 +68,8 @@ Quita:
 
 - El bloque de `co` del rc (con copia previa).
 - Los servicios del dashboard y de Laya.
-- Los enlaces de los agentes y `~/bin/router`, solo si apuntan a este proyecto.
+- Los enlaces de los agentes y `~/bin/router`, solo si apuntan a este proyecto o a la copia estable.
+- La copia estable `~/.agent-router/app` (`git worktree remove`; si tiene cambios sin confirmar, avisa y la deja).
 - `co-settings.json` y `statusline-next`.
 
 No borra:
@@ -81,6 +90,19 @@ router --agentes-usuario "…"                            # usa tus agentes de ~
 
 Sin `--model`, Opus orquesta. Con `--model` se usa un único modelo (`haiku`, `sonnet` u `opus`).
 
+### Cuota por ejecución: `router cuota`
+
+Compara cuánta cuota (5 h y 7 d) gasta cada orquestador (Sonnet frente a Opus, etc.). Cada ejecución guarda la cuota conocida de su cuenta al empezar (`run_start.quota`) y al terminar (`run_end.quota`, junto con `mainModel` y `byModel`, los tokens por modelo y tipo), tomada de la última lectura de la statusline; sin dato guarda `null`. Sirve igual para `co` y `cop` (el perfil va en el evento y el informe agrupa por perfil, porque cada cuenta tiene su propia cuota).
+
+```bash
+router cuota                       # todos los días
+router cuota --dias 7 --perfil trabajo
+router cuota --detalle             # lista cada run no fiable con su motivo
+router cuota --aprox               # incluye runs anteriores al registro (cuota aproximada)
+```
+
+Tabla por día, orquestador y perfil: nº de runs, runs con delta completo, puntos porcentuales por run (fin menos inicio) y sumados, tokens del orquestador y de subagentes, encargos y puntos por encargo. Se ignoran los runs que cruzan un reset, abiertos o sin dato, y se cuentan como NO FIABLES. Límites: la statusline da la cuota en puntos enteros, y si usas la misma cuenta en otra sesión a la vez, sus gastos también suman al delta.
+
 ### Sesiones interactivas: `co`
 
 `co` es `claude` en modo orquestador y acepta sus mismas opciones:
@@ -91,9 +113,34 @@ co                    # en cualquier proyecto
 
 Cada mensaje tuyo es una ejecución en el dashboard, desde el mensaje hasta `Stop`. Las sesiones normales de `claude` no cambian: los hooks y la statusline van solo por `--settings` en `co`.
 
-En un proyecto con su propio `.claude/agents/asistente.md` o `programador.md`, Claude Code usa esos en lugar de los genéricos.
+En un proyecto con su propio `.claude/agents/asistente.md`, `programador.md` o `consultor.md`, Claude Code usa esos en lugar de los genéricos.
 
 **Segundo perfil (opcional).** Si defines `ROUTER_PROFILE2_DIR` con la carpeta de config de otra cuenta antes de ejecutar `npm run instalar` (si la carpeta existe), el instalador añade el alias `cop` (o el que indiques en `ROUTER_PROFILE2_ALIAS`). `cop` ejecuta `co` con `CLAUDE_CONFIG_DIR` apuntando a esa carpeta y con los argumentos de `ROUTER_PROFILE2_ARGS`.
+
+### Telemetría opcional: `router telemetry`
+
+Opt-in y apagada por defecto. Con `ROUTER_TELEMETRY_URL` y `ROUTER_TELEMETRY_TOKEN` definidas, cada run cerrado envía sus **métricas** a un servicio propio (el esquema está en el repo `agent-router-telemetry`). Sin las dos claves no se hace ninguna petición ni se crea ningún archivo.
+
+```bash
+router telemetry status   # activada o no, pendientes, enviados, rechazados y últimos errores
+router telemetry flush    # envía ahora los pendientes (lo lanza solo cada run al cerrarse)
+```
+
+Al cerrarse un run (hook de `co`/`cop`, cierre con Esc o `router` headless) se lanza en segundo plano `router telemetry flush`; nunca espera ni bloquea la sesión y cualquier fallo se traga y se anota en `<ROUTER_HOME>/telemetry-errors.log` (sin el token). Los runs cerrados de los últimos 30 días se envían en lotes de hasta 50 con `POST <URL>/v1/runs` y `Authorization: Bearer <token>`, con 3 s de tope por petición. Se reenvía un run solo si ha crecido desde el último envío. Estado en `<ROUTER_HOME>/telemetry-sent.json` (`{runId: nº de eventos}`) y `telemetry-rejected.json`; un `400` marca el run como rechazado (no se reintenta) y anota su id y el mensaje de validación, nunca su contenido; un `401` o un `5xx` o la falta de red dejan los runs pendientes para el siguiente intento.
+
+**Qué se envía** (solo números, estados y ids de modelo):
+- Id del run, versión (`rev`), clave del perfil (no su etiqueta), modo (`sesion`, `orquestado` o `directo`) y estado final.
+- Modelo real del orquestador, código de salida, inicio, fin y duración.
+- Cuota al empezar y al acabar: porcentaje de 5 h y de 7 d (0 a 100) y su momento de reinicio.
+- Tokens por modelo del orquestador y de cada encargo (entrada, salida, caché).
+- Ediciones directas del orquestador y recuento de errores por tipo (`limit`, `api`, `permission`).
+- Resumen de Laya por run (solo si hubo decisiones, campo `laya`): modelo de Laya más frecuente, nº de decisiones, errores (total y por tipo: `timeout`, `connection`, `http`, `parse`, `unknown`), nº de aplicadas y latencia p50/p90 en ms. Nunca la elección, la confianza, la petición ni el texto de los errores.
+- Por encargo: número de orden, agente, modelo, estado, duración, usos de herramientas e intento.
+- Tareas sin inicio registrado: si un subagente gasta tokens en un run donde no consta su arranque (por ejemplo, lo arrancó un run anterior de la misma sesión y se reanudó en este), el gasto se cuenta igualmente como una tarea más con `agent` y `status` a `null` y su modelo y tokens. El dashboard no las muestra; solo afectan al documento de telemetría.
+
+**Qué no se envía nunca**: texto de tareas, prompts, descripciones, resultados, rutas o `cwd`, mensajes de error, nombres de herramientas, `sessionId`, etiquetas manuales ni el token en ningún log.
+
+**Desactivar**: quita `ROUTER_TELEMETRY_URL` (de `config.env` y del entorno). Lo ya enviado se borra en el servicio, no aquí.
 
 ### Dashboard
 
@@ -134,6 +181,7 @@ Solo `src/config.mjs` lee variables de entorno. El resto del código recibe la c
 | `ROUTER_FALLBACK_MODEL` | `sonnet` | Modelo de respaldo si Opus está saturado. |
 | `ROUTER_MAX_BUDGET_USD` | sin tope | Tope de gasto por ejecución. |
 | `CLAUDE_BIN` | `claude` | Binario de Claude Code. |
+| `ROUTER_RELEVO_TOKENS` | `150000` | Contexto (tokens) de la sesión principal a partir del cual el orquestador escribe un archivo de relevo en `<ROUTER_HOME>/relevo/<perfil>/<proyecto>.md` y te pide abrir un `co`/`cop` nuevo, que lo recibe al arrancar. La statusline y el dashboard muestran «relevo». |
 | `ROUTER_SEAT_USD` | sin definir | Precio mensual de tu plan. Sin él no se muestra «Rendimiento del seat». |
 | `ROUTER_MONITOR_BIN` | `claude-monitor` | Ruta de claude-monitor. El instalador fija la ruta absoluta si la encuentra. |
 | `ROUTER_MONITOR_WAREHOUSE` | activo | `0` apaga el histórico de claude-monitor (sin totales por día, semana y mes). |
@@ -141,6 +189,7 @@ Solo `src/config.mjs` lee variables de entorno. El resto del código recibe la c
 | `ROUTER_SHADOW_PROVIDER` | `laya` | `laya` (local) o `jev` (OpenRouter). |
 | `ROUTER_SHADOW_MODEL` | `typesafe/jev-1.13` | Solo con `jev`, vía OpenRouter. |
 | `ROUTER_LAYA_URL` | `http://127.0.0.1:4318/v1/systemone` | Endpoint de Laya. |
+| `ROUTER_LAYA_TIMEOUT_MS` | `1000` | Presupuesto único de Laya en el hook de Agent/Task (fail-open: al vencer, el hook sigue sin ella). En macOS, `npm run instalar` añade `com.agent-router.laya-warm`, que cada 45 s hace una petición mínima para que Laya no se enfríe (frío ~300 ms, caliente ~30 ms); `desinstalar` lo quita. |
 | `ROUTER_LAYA_VENV` | `~/.agent-router/laya-venv` | Entorno Python de Laya. |
 | `ROUTER_LAYA_HF_HOME` | `~/.agent-router/hf` | Caché de modelos de Hugging Face de Laya. |
 | `ROUTER_LAYA_PYTHON` | sin definir | Intérprete Python 3.12 o superior para crear el venv. Sin él, busca `python3.12` y luego `python3`. |
@@ -149,6 +198,10 @@ Solo `src/config.mjs` lee variables de entorno. El resto del código recibe la c
 | `ROUTER_PROFILE2_LABEL` | derivada de la carpeta (`~/.claude-X` → `X`) | Etiqueta del segundo perfil. |
 | `ROUTER_PROFILE2_ALIAS` | `cop` | Nombre del alias del segundo perfil. Letras, números, `-` y `_`; distinto de `co`. |
 | `ROUTER_PROFILE2_ARGS` | vacío | Argumentos extra para `claude` en ese perfil (por ejemplo, canales). |
+| `ROUTER_PROFILE_BROWSER_ID` | sin definir | `deviceId` (UUID) del navegador de Claude in Chrome del perfil principal. Si se define, el prompt del orquestador le manda ejecutar `select_browser` con ese id antes de usar el navegador. |
+| `ROUTER_PROFILE2_BROWSER_ID` | sin definir | Lo mismo para el segundo perfil (`cop`). Cada perfil usa solo su id. |
+| `ROUTER_TELEMETRY_URL` | sin definir | URL base del servicio de telemetría (por ejemplo `https://telemetry.example.com`). Debe ser `https`; `http` solo para `localhost`, `127.0.0.1` y `::1`. Sin ella (o sin el token) la telemetría está desactivada. |
+| `ROUTER_TELEMETRY_TOKEN` | sin definir | Token Bearer del servicio. Nunca se imprime ni se escribe en logs. |
 
 ### Dónde se definen
 
@@ -169,6 +222,7 @@ El prompt del orquestador (`src/core/prompt.mjs`) le pide:
 1. Leer lo justo para entender la tarea.
 2. Dividirla en encargos autocontenidos, con un criterio de aceptación comprobable.
 3. Hacer él solo lo que exige criterio: arquitectura, autenticación, cifrado, migraciones y borrados.
+   Para decisiones de diseño o de riesgo que no quiera resolver en su contexto, puede pedir una recomendación corta al `consultor` (Opus, solo lectura).
 4. Lanzar en paralelo lo independiente. Usa `isolation: "worktree"` solo si hay repositorio git y dos programadores van a tocar los mismos archivos.
 5. Revisar cada resultado y reintentar o asumir lo que falle.
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Hook de las sesiones `co`/`cop`: traduce cada evento de Claude Code a eventos del dashboard.
-// Siempre sale con 0. Solo escribe en stdout al inyectar pendientes tras compactar y al denegar subagentes bloqueados (blockedAgents) y al bajar de nivel un subagente (layaRouting=downgrade).
+// Siempre sale con 0. Solo escribe en stdout al inyectar pendientes tras compactar, el relevo al arrancar o su aviso, el aviso de edición directa y al denegar subagentes bloqueados (blockedAgents) y al bajar de nivel un subagente (layaRouting=downgrade).
 import { spawn } from "node:child_process";
 import { appendFile, mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -10,7 +10,9 @@ import { createStore } from "../src/core/store.mjs";
 import { createSessions } from "../src/core/sessions.mjs";
 import { interruptedIn, liveAgentUsageDue, liveUsageDue, translateHook } from "../src/core/hooks.mjs";
 import { MAX_FULL, readFrom, readSince, transcriptSize } from "../src/core/transcript.mjs";
-import { advanceUsage, agentTranscriptPath, startUsage, usageFromTranscript } from "../src/core/usage.mjs";
+import { advanceContext, startContext } from "../src/core/context.mjs";
+import { summarizeSubagent } from "../src/core/subagent.mjs";
+import { advanceUsage, agentTranscriptPath, lastModelOf, startUsage, usageFromTranscript } from "../src/core/usage.mjs";
 import { makeRunId } from "../src/core/run.mjs";
 import { markLostTasks, reduceEvents } from "../src/core/reducer.mjs";
 import { compactionsFromTranscript } from "../src/core/compaction.mjs";
@@ -18,6 +20,9 @@ import { blockEvent, decideBlock, denyOutput } from "../src/core/block-agents.mj
 import { createLayaClassifier } from "../src/core/classifier.mjs";
 import { routeAgent } from "../src/core/laya-routing.mjs";
 import { collectPending, formatPending } from "../src/core/pending.mjs";
+import { decideRelevo, relevoPath, relevoStartupContext, relevoUsedPath } from "../src/core/relevo.mjs";
+import { DIRECT_EDIT_WARNING, isDirectEdit } from "../src/core/delegar.mjs";
+import { launchTelemetryFlush } from "../src/core/telemetry-flush.mjs";
 
 const config = loadConfig();
 
@@ -27,12 +32,9 @@ async function readStdin() {
   return data;
 }
 
-// Leer un transcript para el coste nunca debe hacer fallar el hook: sin datos, sin evento.
-async function usageOf(path, offset, sidechain) {
-  try {
-    if (!path) return null;
-    return usageFromTranscript(await readFrom(path, offset), { sidechain });
-  } catch { return null; }
+// Texto completo del transcript de un subagente; null si no hay ruta o no se puede leer.
+async function agentTextOf(path) {
+  try { return path ? await readFrom(path, 0) : null; } catch { return null; }
 }
 
 // Gasto del orquestador desde session.transcriptOffset, incremental: la sesión guarda hasta dónde se leyó y lo acumulado,
@@ -47,6 +49,19 @@ async function orchestratorUsageOf(path, session) {
     else if (size - state.offset > MAX_FULL) state = { ...state, offset: size - MAX_FULL }; // readSince solo devuelve el final
     const res = advanceUsage(state, await readSince(path, state.offset, MAX_FULL), { sidechain: false });
     return { usage: res.usage, state: res.state };
+  } catch { return null; }
+}
+
+// Contexto del orquestador por turno, incremental como el gasto: el estado (offset, turno, ids recientes) vive en la sesión.
+async function orchestratorContextOf(path, session, now) {
+  try {
+    if (!path || session.transcriptOffset == null) return null;
+    let state = session.contextState ?? startContext(session.transcriptOffset);
+    const size = await transcriptSize(path);
+    if (size == null) return null;
+    if (size < state.offset) state = startContext(session.transcriptOffset);
+    else if (size - state.offset > MAX_FULL) state = { ...state, offset: size - MAX_FULL };
+    return advanceContext(state, await readSince(path, state.offset, MAX_FULL), now);
   } catch { return null; }
 }
 
@@ -120,6 +135,28 @@ async function onSessionStartCompact(payload, now) {
   } catch { /* limpieza best effort */ }
 }
 
+const additionalContext = (hookEventName, text) => process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName, additionalContext: text } }));
+
+// SessionStart (source "startup"): si hay relevo de este perfil y cwd, se inyecta una sola vez y el archivo pasa a .usado-<fecha>.md.
+async function onSessionStartup(payload, now) {
+  const file = relevoPath({ home: config.home, profile: config.profile, cwd: payload.cwd });
+  let md;
+  try { md = await readFile(file, "utf8"); } catch { return; }
+  if (!md.trim()) return;
+  await rename(file, relevoUsedPath(file, now));
+  additionalContext("SessionStart", relevoStartupContext(md));
+}
+
+// UserPromptSubmit: una vez por sesión, al pasar el umbral de contexto (dato de la statusline), pide el relevo.
+async function onRelevoCheck(payload, sessions, flags) {
+  if (flags.relevoAsked) return;
+  const context = await sessions.loadContext(payload.session_id);
+  const text = decideRelevo({ tokens: context?.tokens, threshold: config.relevoTokens, asked: false, path: relevoPath({ home: config.home, profile: config.profile, cwd: payload.cwd }) });
+  if (!text) return;
+  await sessions.saveFlags(payload.session_id, { ...flags, relevoAsked: true });
+  additionalContext("UserPromptSubmit", text);
+}
+
 // SessionStart (source "compact"): el límite de compactación ya está en el transcript. Se anota el último (preTokens,
 // postTokens, duración, tamaño del resumen, modelo) en la ejecución para estimar su coste. Una sola vez por límite.
 async function onCompactStats(payload, session, store) {
@@ -149,6 +186,13 @@ try {
       try { await onCompactStats(payload, session, store); } catch { /* el coste es accesorio: nunca impide inyectar pendientes */ }
       await onSessionStartCompact(payload, Date.now());
     }
+    if (payload.source === "startup") {
+      await onSessionStartup(payload, Date.now());
+      // El primer mensaje aún no tiene assistant en el transcript: el modelo de SessionStart (opcional) cubre ese hueco.
+      if (typeof payload.model === "string" && payload.model) {
+        try { await sessions.saveFlags(payload.session_id, { ...(await sessions.loadFlags(payload.session_id)), startModel: payload.model }); } catch { /* accesorio */ }
+      }
+    }
     process.exit(0);
   }
 
@@ -164,7 +208,7 @@ try {
   if (config.layaRouting !== "off") {
     try {
       const classifier = createLayaClassifier({ url: config.shadow.layaUrl, fetch, timeoutMs: config.layaTimeoutMs, ...(config.layaRoutingModel && { model: config.layaRoutingModel }) });
-      const routed = await routeAgent({ payload, mode: config.layaRouting, threshold: config.layaDowngradeThreshold, classifier, timeoutMs: config.layaTimeoutMs });
+      const routed = await routeAgent({ payload, mode: config.layaRouting, threshold: config.layaDowngradeThreshold, classifier, timeoutMs: config.layaTimeoutMs + 200 }); // margen: que venza antes el timeout del clasificador (lleva errorKind)
       if (routed) {
         if (session.runId) await store.append(session.runId, routed.event);
         if (routed.output) {
@@ -175,7 +219,21 @@ try {
     } catch { /* Laya nunca puede romper ni bloquear el hook */ }
   }
 
-  const ctx = { profile: config.profile };
+  // Última cuota que vio la statusline en esta sesión (la deja en <sesión>.quota.json); sin ella, null.
+  const ctx = { profile: config.profile, quota: await sessions.loadQuota(payload.session_id) };
+  // Flags de la sesión (ediciones directas, relevo ya avisado): solo se leen en los dos eventos que los usan.
+  const useFlags = payload.hook_event_name === "UserPromptSubmit" || isDirectEdit(payload);
+  const flags = useFlags ? await sessions.loadFlags(payload.session_id) : null;
+  if (flags) ctx.directEdits = flags.directEdits ?? 0;
+  if (isDirectEdit(payload)) {
+    // Solo aviso: nunca permissionDecision.
+    await sessions.saveFlags(payload.session_id, { ...flags, directEdits: ctx.directEdits + 1 });
+    additionalContext("PreToolUse", DIRECT_EDIT_WARNING);
+  }
+  if (payload.hook_event_name === "UserPromptSubmit") {
+    const fromTranscript = payload.transcript_path ? lastModelOf(await readSince(payload.transcript_path, 0, TAIL_BYTES).catch(() => "")) : null;
+    ctx.mainModel = fromTranscript ?? flags?.startModel ?? null;
+  }
   if (payload.hook_event_name === "UserPromptSubmit" && payload.transcript_path) {
     ctx.transcriptSize = await transcriptSize(payload.transcript_path);
     if (session.runId && session.transcriptOffset != null) {
@@ -183,7 +241,12 @@ try {
       if (ctx.interrupted) ctx.orchestratorUsage = (await orchestratorUsageOf(payload.transcript_path, session))?.usage ?? null;
     }
   }
-  if (payload.hook_event_name === "SubagentStop") ctx.agentUsage = await usageOf(agentTranscriptPath(payload), 0, true);
+  if (payload.hook_event_name === "SubagentStop") {
+    const text = await agentTextOf(agentTranscriptPath(payload));
+    ctx.agentUsage = text == null ? null : usageFromTranscript(text, { sidechain: true });
+    ctx.agentSummary = text == null ? null : summarizeSubagent(text);
+  }
+  if (payload.hook_event_name === "SubagentStart") ctx.agentModel = summarizeSubagent(await agentTextOf(agentTranscriptPath(payload)) ?? "").model;
   if (liveAgentUsageDue(payload, session, Date.now())) {
     const a = await agentUsageOf(agentTranscriptPath(payload), session.agentUsage?.[payload.agent_id]?.state);
     if (a) ctx.agentLive = a;
@@ -197,6 +260,9 @@ try {
   if ((closes && session.runId) || liveUsageDue(payload, session, now)) {
     const o = await orchestratorUsageOf(payload.transcript_path, session);
     if (o) { ctx.orchestratorUsage = o.usage; ctx.usageState = o.state; }
+    const c = await orchestratorContextOf(payload.transcript_path, session, now);
+    if (c) { ctx.contextEvents = c.events; ctx.contextState = c.state; }
+    if (payload.transcript_path) ctx.mainModel = lastModelOf(await readSince(payload.transcript_path, 0, TAIL_BYTES).catch(() => ""));
   }
 
   const res = translateHook(payload, session, now, makeRunId, ctx);
@@ -204,6 +270,11 @@ try {
   for (const ev of res.events) await store.append(res.runId, ev);
   if (res.session !== session) await sessions.save(payload.session_id, res.session);
   if (res.shadow) await launchShadow(res.shadow);
+  // Run cerrado: un hijo desacoplado envía la telemetría (el hook no espera ni hace red). Desactivada, no lanza nada.
+  if ([...(res.before?.events ?? []), ...res.events].some((e) => e.type === "run_end")) {
+    launchTelemetryFlush({ config, script: fileURLToPath(new URL("./router.mjs", import.meta.url)) });
+  }
+  if (payload.hook_event_name === "UserPromptSubmit") await onRelevoCheck(payload, sessions, flags);
 } catch (e) {
   try {
     await mkdir(config.home, { recursive: true });

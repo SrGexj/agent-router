@@ -4,16 +4,25 @@ import { loadConfig } from "../src/config.mjs";
 import { reduceEvents } from "../src/core/reducer.mjs";
 
 const pre = (input, tool = "Agent") => ({ hook_event_name: "PreToolUse", tool_name: tool, tool_input: input });
-const BLOCKED = ["general-purpose", "fork"];
+const BLOCKED = ["general-purpose", "fork", "claude", "Explore", "Plan"];
 
 describe("decideBlock", () => {
   it("bloquea general-purpose, fork y la ausencia de subagent_type", () => {
     for (const input of [{ subagent_type: "general-purpose" }, { subagent_type: "fork" }, { description: "x" }, {}]) {
       const d = decideBlock(pre(input), BLOCKED);
       expect(d?.agent).toBe(input.subagent_type ?? "general-purpose");
-      expect(d.reason).toMatch(/^Bloqueado por agent-router: .* corre en Opus\. Relanza con subagent_type "programador"/);
+      expect(d.reason).toMatch(/^Bloqueado por agent-router: .* corre en Opus\. Relanza con subagent_type "asistente"/);
       expect(d.reason).toContain("pídeselo al usuario");
     }
+  });
+  it("bloquea claude, Explore y Plan, sin distinguir mayúsculas", () => {
+    for (const a of ["claude", "Explore", "explore", "Plan", "PLAN"]) expect(decideBlock(pre({ subagent_type: a }), BLOCKED)?.agent).toBe(a);
+  });
+  it("el motivo apunta a asistente (Haiku) y programador (Sonnet)", () => {
+    const r = decideBlock(pre({ subagent_type: "Explore" }), BLOCKED).reason;
+    expect(r).toContain('"asistente" (Haiku: docs, web, navegador, comprobaciones)');
+    expect(r).toContain('"programador" (Sonnet: código)');
+    expect(r).toContain('"consultor" (Opus, solo lectura: decisiones de diseño o riesgo)');
   });
   it("también con la herramienta Task", () => {
     expect(decideBlock(pre({ subagent_type: "fork" }, "Task"), BLOCKED)).not.toBeNull();
@@ -42,7 +51,7 @@ describe("blockEvent y reducer", () => {
 
 describe("config blockedAgents", () => {
   const cfg = (env) => loadConfig({ HOME: "/h", ...env }, { exists: () => false }).blockedAgents;
-  it("por defecto general-purpose y fork", () => expect(cfg({})).toEqual(BLOCKED));
+  it("por defecto general-purpose, fork, claude, Explore y Plan", () => expect(cfg({})).toEqual(BLOCKED));
   it("coma-separada, recortada", () => expect(cfg({ ROUTER_BLOCKED_AGENTS: " a, b ,," })).toEqual(["a", "b"]));
   it("vacío = desactivado", () => expect(cfg({ ROUTER_BLOCKED_AGENTS: "" })).toEqual([]));
 });

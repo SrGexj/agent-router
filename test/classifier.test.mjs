@@ -44,6 +44,18 @@ describe("buildClassifierRequest", () => {
   });
 });
 
+describe("pregunta de ruta", () => {
+  const q = buildClassifierRequest("x", "m").questions.route;
+  it("no sesga a programación y describe opus como planificar/diseñar/riesgo", () => {
+    expect(q.instructions).not.toMatch(/programaci/i);
+    for (const k of ["planific", "diseño", "arquitectura", "riesgos", "migraciones", "ambigu"]) expect(q.criteria.opus.toLowerCase()).toContain(k);
+  });
+  it("programador = código ya decidido; asistente = acotado con criterio claro", () => {
+    expect(q.criteria.programador).toMatch(/código ya decidido/);
+    expect(q.criteria.asistente).toMatch(/criterio claro/);
+  });
+});
+
 describe("parseClassifierResponse", () => {
   it("lee la fixture", () => {
     expect(parseClassifierResponse(fixture)).toMatchObject({ choice: "asistente", confidence: 0.97, usage: { input: 312, output: 34 }, costUsd: null });
@@ -178,6 +190,22 @@ describe("Laya (local)", () => {
     const slow = (_u, { signal }) => new Promise((_, rej) => signal.addEventListener("abort", () => rej(Object.assign(new Error("a"), { name: "AbortError" }))));
     await expect(make(slow, { timeoutMs: 20 }).classify("x")).rejects.toThrow("laya no disponible");
     await expect(make(okFetch({}, 503)).classify("x")).rejects.toThrow("laya no disponible");
+  });
+  it("errorKind distingue timeout, conexión, http y parse sin cambiar el mensaje", async () => {
+    const kind = async (p) => p.then(() => null, (e) => e.errorKind);
+    const refused = async () => { throw new Error("ECONNREFUSED"); };
+    const slow = (_u, { signal }) => new Promise((_, rej) => signal.addEventListener("abort", () => rej(Object.assign(new Error("a"), { name: "AbortError" }))));
+    expect(await kind(make(refused).classify("x"))).toBe("connection");
+    expect(await kind(make(slow, { timeoutMs: 20 }).classify("x"))).toBe("timeout");
+    expect(await kind(make(okFetch({}, 503)).classify("x"))).toBe("http");
+    expect(await kind(make(okFetch({}, 400)).classify("x"))).toBe("http");
+    expect(await kind(make(okFetch({ answers: { route: { choice: "gpt" } } })).classify("x"))).toBe("parse");
+    expect(await kind(make(async () => ({ ok: true, status: 200, json: async () => { throw new Error("x"); } })).classify("x"))).toBe("parse");
+    await expect(make(slow, { timeoutMs: 20 }).classify("x")).rejects.toThrow("laya no disponible");
+  });
+  it("expone el modelo pedido", () => {
+    expect(make(async () => ({})).model).toBe(LAYA_MODEL);
+    expect(make(async () => ({}), { model: "encargos" }).model).toBe("encargos");
   });
   it("JSON roto o elección inválida: error propio, no 'no disponible'", async () => {
     await expect(make(okFetch({ answers: { route: { choice: "gpt" } } })).classify("x")).rejects.toThrow(/elección/);

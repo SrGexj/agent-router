@@ -25,7 +25,7 @@ describe("translateHook: una sesión co a eventos del dashboard", () => {
     ]);
     expect(events).toEqual([
       { type: "run_start", runId: "r-abcdef12-1", task: "Arregla el login", mode: "sesion", model: "opus", cwd: "/repo", profile: "trabajo", t: T },
-      { runId: "r-abcdef12-1", type: "run_end", exitCode: 0, t: T }
+      { runId: "r-abcdef12-1", type: "run_end", exitCode: 0, status: "completed", t: T }
     ]);
     expect(session).toEqual({ runId: null, lastRunId: "r-abcdef12-1", seq: 1 });
   });
@@ -93,7 +93,7 @@ describe("translateHook: una sesión co a eventos del dashboard", () => {
     const lim = play([{ hook_event_name: "UserPromptSubmit", prompt: "x" }, { hook_event_name: "StopFailure", error: "rate_limit" }]);
     expect(lim.events.slice(1)).toEqual([
       { runId: "r-abcdef12-1", type: "error", kind: "limit", window: null, resetsAt: null, message: "Límite de uso alcanzado", t: T },
-      { runId: "r-abcdef12-1", type: "run_end", exitCode: 1, t: T }
+      { runId: "r-abcdef12-1", type: "run_end", exitCode: 1, status: "limited", t: T }
     ]);
     const bad = play([{ hook_event_name: "UserPromptSubmit", prompt: "x" }, { hook_event_name: "StopFailure", error: "overloaded", error_details: "529" }]);
     expect(bad.events[1]).toMatchObject({ type: "error", kind: "api", message: "overloaded: 529" });
@@ -330,7 +330,7 @@ describe("coste real desde transcripts", () => {
   it("Stop, StopFailure y SessionEnd emiten orchestrator_usage antes de run_end", () => {
     const ctx = { orchestratorUsage: usage("claude-opus-5-5", 9) };
     const ev = { type: "orchestrator_usage", ...usage("claude-opus-5-5", 9), t: T };
-    expect(hook({ hook_event_name: "Stop", background_tasks: [] }, open1(), ctx).events).toEqual([ev, { type: "run_end", exitCode: 0, t: T }]);
+    expect(hook({ hook_event_name: "Stop", background_tasks: [] }, open1(), ctx).events).toEqual([ev, { type: "run_end", exitCode: 0, status: "completed", byModel: ev.byModel, t: T }]);
     expect(hook({ hook_event_name: "StopFailure", error: "x" }, open1(), ctx).events.map((e) => e.type)).toEqual(["error", "orchestrator_usage", "run_end"]);
     expect(hook({ hook_event_name: "SessionEnd" }, open1(), ctx).events.map((e) => e.type)).toEqual(["orchestrator_usage", "run_end"]);
   });
@@ -341,7 +341,7 @@ describe("coste real desde transcripts", () => {
   });
 
   it("sin uso en ctx no se emite nada extra", () => {
-    expect(hook({ hook_event_name: "Stop" }).events).toEqual([{ type: "run_end", exitCode: 0, t: T }]);
+    expect(hook({ hook_event_name: "Stop" }).events).toEqual([{ type: "run_end", exitCode: 0, status: "completed", t: T }]);
   });
 
   it("el cierre por Esc (statusline o mensaje nuevo) también lleva el uso", () => {
@@ -349,6 +349,44 @@ describe("coste real desde transcripts", () => {
     expect(closeInterrupted({ runId: "r1", seq: 1 }, T, o).events.map((e) => e.type)).toEqual(["orchestrator_usage", "run_end"]);
     const res = hook({ hook_event_name: "UserPromptSubmit", prompt: "z" }, open1(), { interrupted: true, orchestratorUsage: o });
     expect(res.before.events.map((e) => e.type)).toEqual(["orchestrator_usage", "run_end"]);
+  });
+});
+
+describe("modelo real del orquestador (main_model)", () => {
+  it("lastModelOf: modelo del último assistant principal, sin subagentes ni sintéticos", async () => {
+    const { lastModelOf } = await import("../src/core/usage.mjs");
+    const line = (o) => JSON.stringify({ type: "assistant", message: { id: o.id, model: o.model, usage: { input_tokens: 1, output_tokens: 1 } }, ...(o.side && { isSidechain: true }) });
+    const text = [line({ id: "1", model: "claude-opus-5-5" }), line({ id: "2", model: "claude-sonnet-5-5" }), line({ id: "3", model: "claude-haiku-5-5", side: true }), line({ id: "4", model: "<synthetic>" })].join("\n");
+    expect(lastModelOf(text)).toBe("claude-sonnet-5-5");
+    expect(lastModelOf("")).toBeNull();
+  });
+
+  it("Stop con ctx.mainModel emite main_model antes de run_end; una vez por valor en vivo", () => {
+    const ctx = { mainModel: "claude-sonnet-5-5" };
+    expect(hook({ hook_event_name: "Stop", background_tasks: [] }, open1(), ctx).events).toEqual([{ type: "main_model", model: "claude-sonnet-5-5", t: T }, { type: "run_end", exitCode: 0, status: "completed", mainModel: "claude-sonnet-5-5", t: T }]);
+    const live = { ...ctx, orchestratorUsage: usage("claude-sonnet-5-5", 2), usageState: { offset: 9, byModel: {}, recent: [] } };
+    const res = hook({ hook_event_name: "PostToolUse", tool_name: "Bash" }, open1(), live);
+    expect(res.events.map((e) => e.type).sort()).toEqual(["main_model", "orchestrator_usage"]);
+    expect(res.session.mainModel).toBe("claude-sonnet-5-5");
+    const again = hook({ hook_event_name: "PostToolUse", tool_name: "Bash" }, { ...res.session, lastUsageAt: 0 }, live);
+    expect(again.events.map((e) => e.type)).toEqual(["orchestrator_usage"]);
+  });
+
+  it("UserPromptSubmit con ctx.mainModel emite main_model tras run_start y lo recuerda en la sesión", () => {
+    const res = translateHook({ ...base, hook_event_name: "UserPromptSubmit", prompt: "hola" }, { runId: null, seq: 0 }, T, makeRunId, { mainModel: "claude-sonnet-5-5" });
+    expect(res.events.map((e) => e.type)).toEqual(["run_start", "main_model"]);
+    expect(res.events[1]).toMatchObject({ model: "claude-sonnet-5-5" });
+    expect(res.session.mainModel).toBe("claude-sonnet-5-5");
+    const none = translateHook({ ...base, hook_event_name: "UserPromptSubmit", prompt: "hola" }, { runId: null, seq: 0 }, T, makeRunId, {});
+    expect(none.events.map((e) => e.type)).toEqual(["run_start"]);
+  });
+
+  it("run_start model fijo no pisa el main_model real en el reducer", () => {
+    const run = reduceEvents([
+      { type: "run_start", runId: "r", task: "x", mode: "sesion", model: "opus", cwd: "/", t: 0 },
+      { type: "main_model", model: "claude-sonnet-5-5", t: 1 }
+    ]);
+    expect(run.mainModel).toBe("claude-sonnet-5-5");
   });
 });
 
@@ -480,5 +518,29 @@ describe("gasto de subagentes en vivo", () => {
       { type: "task_usage", taskId: "a1", snapshot: true, ...usage("claude-sonnet-5-5", 9), t: 4 }
     ]);
     expect(run.tasks.a1.usage["claude-sonnet-5-5"].input).toBe(9);
+  });
+});
+
+describe("run_end siempre lleva estado", () => {
+  const endOf = (p, session = open1(), ctx = {}) => hook(p, session, ctx).events.find((e) => e.type === "run_end");
+
+  it("Stop cierra como completed", () => {
+    expect(endOf({ hook_event_name: "Stop", background_tasks: [] })).toMatchObject({ exitCode: 0, status: "completed" });
+  });
+
+  it("StopFailure con rate_limit cierra como limited y con otro error como failed", () => {
+    expect(endOf({ hook_event_name: "StopFailure", error: "rate_limit" })).toMatchObject({ exitCode: 1, status: "limited" });
+    expect(endOf({ hook_event_name: "StopFailure", error: "overloaded", error_details: "529" })).toMatchObject({ exitCode: 1, status: "failed" });
+  });
+
+  it("SessionEnd y Esc siguen cerrando como cancelled", () => {
+    expect(endOf({ hook_event_name: "SessionEnd" })).toMatchObject({ status: "cancelled" });
+  });
+});
+
+describe("task_end con tokens", () => {
+  it("SubagentStop sin tokens en el resumen los suma de agentUsage", () => {
+    const { events } = hook({ hook_event_name: "SubagentStop", agent_id: "a", last_assistant_message: "ok" }, open1(), { agentUsage: usage("claude-sonnet-5-5", 3) });
+    expect(events.find((e) => e.type === "task_end").tokens).toBe(6);
   });
 });

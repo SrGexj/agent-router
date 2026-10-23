@@ -13,12 +13,61 @@ Opciones:
   --prompt             Imprime el prompt del orquestador con la cuota actual (lo usa el alias co).
   -h, --help           Esta ayuda.
 
+Cuota por ejecución:
+  router cuota [--dias N] [--perfil P] [--detalle] [--aprox]   Puntos de cuota (5 h y 7 d) por día, orquestador y perfil; marca los runs no fiables.
+
+Telemetría (opt-in, solo métricas; se activa con ROUTER_TELEMETRY_URL y ROUTER_TELEMETRY_TOKEN):
+  router telemetry flush                      Envía al servicio los runs cerrados pendientes (los últimos 30 días). Se lanza solo al cerrar cada run.
+  router telemetry status                     Estado: activada o no, runs pendientes, enviados y rechazados, últimos errores.
+
+Copia estable:
+  router actualizar                           Pasa ~/.agent-router/app a origin/main (fetch), reconstruye y reinicia el dashboard.
+
 Ajustar Laya con tus datos:
   router laya-datos [--out archivo.csv] [--perfil <id>|todos]   Exporta las ejecuciones etiquetadas (y un CSV de evaluación aparte).
   router laya-entrenar [--perfil P] [--forzar] [--simular]                  Exporta, ajusta Laya con laya-train y compara con el modelo base.
       [--datos CARPETA]   usa CARPETA/train.jsonl y test.jsonl en vez de las ejecuciones guardadas
       [--micro-batch N] [--grad-accum N] [--max-len N]   memoria (por defecto 1, 64 y 512)
   router laya-usar CARPETA | --quitar                                       Anota qué checkpoint usar y explica cómo aplicarlo.`;
+
+export const isActualizarCommand = (word) => word === "actualizar";
+
+export const isCuotaCommand = (word) => word === "cuota";
+
+export const isTelemetryCommand = (word) => word === "telemetry";
+
+// Argumentos de `router telemetry`. Puro; lanza con un mensaje en castellano si algo no cuadra.
+export function parseTelemetryArgs(argv) {
+  const [, action, ...rest] = argv;
+  if (action !== "flush" && action !== "status") throw new Error(`Uso: router telemetry flush | status${action ? ` (no existe «${action}»)` : ""}.`);
+  if (rest.length) throw new Error(`Opción no válida para telemetry ${action}: ${rest[0]}.`);
+  return { action };
+}
+
+// Argumentos de `router cuota`. Puro; lanza con un mensaje en castellano si algo no cuadra.
+export function parseCuotaArgs(argv) {
+  const [, ...rest] = argv;
+  const out = { days: null, profile: "todos", verbose: false, approx: false };
+  for (let i = 0; i < rest.length; i++) {
+    const a = rest[i];
+    const value = () => {
+      const v = rest[++i];
+      if (v == null || v.startsWith("--")) throw new Error(`Falta el valor de ${a}.`);
+      return v;
+    };
+    if (a === "--dias") {
+      const v = value();
+      if (!/^[1-9]\d*$/.test(v)) throw new Error(`Valor de --dias no válido: ${v} (entero positivo).`);
+      out.days = Number(v);
+    } else if (a === "--perfil") {
+      out.profile = value();
+      if (!/^[a-z0-9-]+$/i.test(out.profile)) throw new Error(`Valor de --perfil no válido: ${out.profile}.`);
+    } else if (a === "--detalle") out.verbose = true;
+    else if (a === "--aprox") out.approx = true;
+    else throw new Error(`Opción no válida para cuota: ${a}.`);
+  }
+  return out;
+}
 
 const LAYA_COMMANDS = new Set(["laya-datos", "laya-entrenar", "laya-usar"]);
 export const isLayaCommand = (word) => LAYA_COMMANDS.has(word);

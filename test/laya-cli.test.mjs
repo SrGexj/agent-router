@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtemp, rm, readFile, writeFile, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { parseLayaArgs, isLayaCommand, USAGE } from "../src/core/cli.mjs";
+import { parseLayaArgs, isLayaCommand, isActualizarCommand, USAGE } from "../src/core/cli.mjs";
 import { loadConfig } from "../src/config.mjs";
 import { createStore } from "../src/core/store.mjs";
 import { createPlatform } from "../src/core/platform/index.mjs";
@@ -54,12 +54,12 @@ beforeEach(async () => {
 });
 afterEach(async () => { await rm(home, { recursive: true, force: true }); });
 
-// n ejecuciones completadas; node = quién las lleva (opus = sin encargos).
+// n ejecuciones completadas; node = quién las lleva (opus = solo un encargo al consultor: sin subagentes no se entrena).
 async function seed(prefix, n, node, profile = "trabajo") {
   for (let i = 0; i < n; i++) {
     const id = `2026${prefix}${String(i).padStart(3, "0")}-1-a`;
     await store.append(id, { type: "run_start", runId: id, task: `Tarea ${prefix} número ${i}, con "comillas"`, mode: "orquestado", model: "opus", cwd: "/", profile, t: 1 });
-    if (node !== "opus") await store.append(id, { type: "task_start", taskId: "a", agent: node, description: "d", prompt: "p", t: 2 });
+    await store.append(id, { type: "task_start", taskId: "a", agent: node === "opus" ? "consultor" : node, description: "d", prompt: "p", t: 2 });
     await store.append(id, { type: "run_end", exitCode: 0, t: 3 });
   }
 }
@@ -114,6 +114,27 @@ describe("laya-entrenar", () => {
     expect(logs.join("\n")).toMatch(/--forzar/);
   });
 
+  it("el mínimo cuenta las semillas que entran al train: pocos opus reales no bloquean", async () => {
+    await seed("a", 30, "asistente");
+    await seed("p", 30, "programador");
+    await seed("o", 5, "opus");
+    const calls = [];
+    const res = await layaEntrenar({ store, config, exec: fakeExec(calls), now: NOW, opts, log });
+    expect(res.refused).toBeFalsy();
+    const trainRows = (await readFile(join(res.outDir, "datos", "train.jsonl"), "utf8")).trim().split("\n").map((l) => JSON.parse(l));
+    const evalRows = (await readFile(join(res.outDir, "datos", "eval.jsonl"), "utf8")).trim().split("\n").map((l) => JSON.parse(l));
+    const t = new Set(trainRows.map((r) => r.state.body));
+    expect(evalRows.some((r) => t.has(r.state.body))).toBe(false);
+    expect(evalRows.filter((r) => r.expected.route === "opus").length).toBeGreaterThan(0);
+    expect(evalRows.filter((r) => r.expected.route === "asistente").length).toBeGreaterThan(0);
+    const csv = await readFile(join(res.outDir, "datos", "train.csv"), "utf8");
+    expect(csv.split("\n").filter((l) => l.includes(",semilla,")).length).toBe(trainRows.filter((r) => !r.state.body.startsWith("Tarea ")).length);
+  });
+  it("el mínimo sigue valiendo: sin suficientes ejemplos totales se niega aunque haya semillas", async () => {
+    await seed("a", 2, "asistente");
+    const res = await layaEntrenar({ store, config, exec: fakeExec([]), now: NOW, opts, log });
+    expect(res.refused).toBe(true);
+  });
   it("entrena, evalúa base y nuevo, y propone cambiar solo si el nuevo gana", async () => {
     await seed("a", 30, "asistente");
     await seed("p", 30, "programador");
@@ -239,5 +260,13 @@ describe("laya-usar", () => {
     const res = await layaUsar({ config, opts: { dir: null, remove: true }, log });
     expect(res.ok).toBe(true);
     await expect(readFile(config.laya.activeFile, "utf8")).rejects.toThrow();
+  });
+});
+
+describe("router actualizar", () => {
+  it("se reconoce como subcomando exacto y sale en la ayuda", () => {
+    expect(isActualizarCommand("actualizar")).toBe(true);
+    expect(isActualizarCommand("actualiza el README")).toBe(false);
+    expect(USAGE).toMatch(/router actualizar/);
   });
 });

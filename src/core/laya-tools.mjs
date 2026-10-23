@@ -7,11 +7,17 @@ import { reduceEvents } from "./reducer.mjs";
 import { CHOICES } from "./classifier.mjs";
 import { defaultPlatform } from "./platform/index.mjs";
 import {
-  trainingRows, toCsv, toJsonl, splitRows, distribution, classWarnings, checkMinimum, scoreEval, compareScores, layaTrainArgs, rowsFromJsonl,
+  trainingRows, addSeeds, parseLocalSeeds, toCsv, toJsonl, splitRows, distribution, classWarnings, checkMinimum, scoreEval, compareScores, layaTrainArgs, rowsFromJsonl,
   DEFAULT_EVAL_RATIO, MIN_PER_CLASS
 } from "./laya-data.mjs";
 
 export const EVAL_SCRIPT = fileURLToPath(new URL("../../bin/laya-evaluar.py", import.meta.url));
+
+// Semillas locales opcionales (texto histórico que no se versiona). Fail-open: ausente o ilegible = ninguna.
+export async function loadLocalSeeds(file) {
+  if (!file) return [];
+  try { return parseLocalSeeds(await readFile(file, "utf8")); } catch { return []; }
+}
 
 export async function loadRuns(store) {
   const runs = await Promise.all((await store.listRunIds()).map(async (id) => reduceEvents(await store.readRun(id))));
@@ -70,7 +76,7 @@ function printScores(log, base, nuevo) {
 }
 
 // Datos de entrada: o las ejecuciones etiquetadas del store, o train.jsonl/test.jsonl de una carpeta (--datos).
-async function prepareData({ store, opts, dataDir, log }) {
+async function prepareData({ store, opts, dataDir, seedsFile, log }) {
   if (opts.datos) {
     const dir = resolve(opts.datos);
     const trainJsonl = join(dir, "train.jsonl");
@@ -83,8 +89,12 @@ async function prepareData({ store, opts, dataDir, log }) {
     return { trainJsonl, evalJsonl, train, ev, dist: distribution(train) };
   }
   const rows = trainingRows(await loadRuns(store), { profile: opts.profile });
-  const dist = distribution(rows);
-  describeDist(dist, rows, log);
+  const split = splitRows(rows, DEFAULT_EVAL_RATIO);
+  // Las semillas se reparten train/eval; el mínimo cuenta las que entran al train.
+  const seeded = addSeeds(split.train, split.eval, await loadLocalSeeds(seedsFile));
+  const counted = [...rows, ...seeded.train.filter((r) => r.source === "semilla")];
+  const dist = distribution(counted);
+  describeDist(dist, counted, log);
   const min = checkMinimum(dist);
   if (!min.ok && !opts.force) {
     log(`No se entrena: ${min.reasons.join("; ")}.`);
@@ -92,10 +102,14 @@ async function prepareData({ store, opts, dataDir, log }) {
     return { refused: true, dist };
   }
   if (!min.ok) log(`Aviso (--forzar): ${min.reasons.join("; ")}.`);
-  const { train, eval: ev } = await writeSplit(rows, join(dataDir, "train.csv"), join(dataDir, "eval.csv"), DEFAULT_EVAL_RATIO);
+  await mkdir(dataDir, { recursive: true });
+  await writeFile(join(dataDir, "train.csv"), toCsv(seeded.train));
+  await writeFile(join(dataDir, "eval.csv"), toCsv(seeded.eval));
   // Para entrenar y evaluar se usa JSONL con el mismo estado y preguntas que el servicio (el CSV de laya-train sintetiza otra pregunta).
   const trainJsonl = join(dataDir, "train.jsonl");
   const evalJsonl = join(dataDir, "eval.jsonl");
+  const train = seeded.train;
+  const ev = seeded.eval;
   await writeFile(trainJsonl, toJsonl(train));
   await writeFile(evalJsonl, toJsonl(ev));
   log(`Datos en ${dataDir} (${train.length} para entrenar, ${ev.length} para evaluar)`);
@@ -106,7 +120,7 @@ export async function layaEntrenar({ store, config, exec, now, opts, log = conso
   const outDir = join(config.laya.modelsDir, stamp(now));
   const dataDir = join(outDir, "datos");
   const modelDir = join(outDir, "modelo");
-  const data = await prepareData({ store, opts, dataDir, log });
+  const data = await prepareData({ store, opts, dataDir, seedsFile: config.laya.seedsFile, log });
   if (data.refused) return { refused: true, dist: data.dist };
   const { trainJsonl, evalJsonl, ev, dist } = data;
   await mkdir(dataDir, { recursive: true });

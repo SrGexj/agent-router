@@ -107,6 +107,11 @@ describe("costShare", () => {
     expect(costShare(run)).toEqual({ opus: 0, sonnet: 67, haiku: 33, source: "encargos" });
   });
 
+  it("consultor cuenta como Opus en la aproximación por encargos", () => {
+    const run = reduceEvents([start, taskStart("a", "asistente", 1), taskStart("b", "programador", 2), taskStart("c", "consultor", 3), taskStart("d", "Explore", 4)]);
+    expect(costShare(run)).toEqual({ opus: 34, sonnet: 33, haiku: 33, source: "encargos" });
+  });
+
   it("sin nada devuelve todo a cero", () => {
     expect(costShare(null)).toEqual({ opus: 0, sonnet: 0, haiku: 0, source: null });
   });

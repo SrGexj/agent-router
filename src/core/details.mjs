@@ -36,7 +36,7 @@ export function isWaiting(run) {
   return run?.status === "running" && run?.waiting != null;
 }
 
-const ROLES = ["orchestrator", "asistente", "programador", "propio"];
+const ROLES = ["orchestrator", "asistente", "programador", "consultor", "propio"];
 const emptyTypes = () => ({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
 
 function addTypes(acc, u) {
@@ -59,8 +59,8 @@ function priceUsage(byModel) {
   return out;
 }
 
-// Rol de gasto de un encargo (para el desglose por rol): asistente, programador o propio (subagentes del orquestador).
-const roleOf = (t) => (t.node === "asistente" ? "asistente" : t.node === "propio" ? "propio" : "programador");
+// Rol de gasto de un encargo (para el desglose por rol): asistente, consultor, propio (nodo "Otros") o programador.
+const roleOf = (t) => (["asistente", "consultor", "propio"].includes(t.node) ? t.node : "programador");
 
 const hasUsage = (byModel) => byModel != null && Object.keys(byModel).length > 0;
 const pct = (part, whole) => (whole > 0 ? (part / whole) * 100 : null);
@@ -222,10 +222,10 @@ export function tokenShare(run) {
 
 // Qué barras tienen algún encargo sin uso conocido (en curso o terminado sin datos): su parte del gasto es
 // desconocida, no cero. Sirve para no pintar "0 %" donde en realidad aún no se sabe. Sin uso, la familia es la del
-// modelo del encargo si se conoce y si no la esperada por su nodo (asistente Haiku, programador Sonnet, propio Opus).
+// modelo del encargo si se conoce y si no la esperada por su nodo (asistente Haiku, programador Sonnet, consultor y propio Opus).
 export function spendUnknown(run) {
   const out = { opus: false, sonnet: false, haiku: false };
-  const expected = { asistente: "haiku", programador: "sonnet", propio: "opus" };
+  const expected = { asistente: "haiku", programador: "sonnet", consultor: "opus", propio: "opus" };
   for (const id of run?.taskOrder ?? []) {
     const t = run.tasks[id];
     if (!hasUsage(t.usage)) out[t.model ? modelFamily(t.model) : expected[t.node] ?? "sonnet"] = true;
@@ -301,17 +301,19 @@ const SHADOW_MODEL = { asistente: "claude-haiku-5-5", programador: "claude-sonne
 // null si sigue en curso o no hay ejecución.
 export function actualRoute(run) {
   if (!run || run.status === "running") return null;
-  const nodes = (run.taskOrder ?? []).map((id) => run.tasks?.[id]?.node).filter((n) => n !== "propio"); // los propios los lleva Opus
+  const nodes = (run.taskOrder ?? []).map((id) => run.tasks?.[id]?.node).filter((n) => n !== "propio" && n !== "consultor"); // los propios y el consultor los lleva Opus
   if (nodes.length === 0) return "opus";
   return nodes.some((n) => n !== "asistente") ? "programador" : "asistente";
 }
 
 // Etiqueta para entrenar: la corrección del usuario manda; si no, lo que hizo Opus (solo si terminó bien).
+// Sin ningún encargo a subagente (ni propio ni consultor) Opus no enrutó nada: sin corrección manual no es ejemplo de ruta.
 export function trainingLabel(run) {
   if (!run || esRunAvisoDelSistema(run)) return null;
   const fixed = run.routeLabel?.label;
   if (fixed) return { label: fixed, source: "usuario" };
   if (run.status !== "completed") return null;
+  if ((run.taskOrder ?? []).length === 0) return null;
   const label = actualRoute(run);
   return label ? { label, source: "auto" } : null;
 }

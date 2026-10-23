@@ -77,7 +77,7 @@ describe("runContext", () => {
   });
   it("buildCoSettings usa la misma constante", async () => {
     const { buildCoSettings } = await import("../src/core/install.mjs");
-    expect(buildCoSettings({ node: "n", root: "/r" }).autoCompactWindow).toBe(CO_AUTOCOMPACT_WINDOW);
+    expect(buildCoSettings({ node: "n", appRoot: "/r" }).autoCompactWindow).toBe(CO_AUTOCOMPACT_WINDOW);
   });
 });
 

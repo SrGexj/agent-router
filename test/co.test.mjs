@@ -1,3 +1,5 @@
+import { servicePlist } from "../src/core/platform/darwin.mjs";
+import { buildLayaRequest } from "../src/core/classifier.mjs";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { spawn } from "node:child_process";
 import { mkdtemp, rm, readdir, readFile, writeFile, mkdir, appendFile } from "node:fs/promises";
@@ -5,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createSessions } from "../src/core/sessions.mjs";
-import { buildCoSettings, coFunction, withZshBlock, withoutZshBlock, launchAgentPlist, layaLaunchAgentPlist, layaInstallPlan, layaServiceSpec, serverServiceSpec, pickPython, parsePythonVersion, LAYA_VERSION, ZSH_START } from "../src/core/install.mjs";
+import { buildCoSettings, coFunction, withZshBlock, withoutZshBlock, launchAgentPlist, layaLaunchAgentPlist, layaInstallPlan, layaServiceSpec, layaWarmSpec, planStatuslineChain, serverServiceSpec, pickPython, parsePythonVersion, LAYA_VERSION, ZSH_START } from "../src/core/install.mjs";
 import { systemdUnit } from "../src/core/platform/linux.mjs";
 import { loadConfig } from "../src/config.mjs";
 import { parseCliArgs } from "../src/core/cli.mjs";
@@ -167,7 +169,7 @@ describe("router --prompt", () => {
 });
 
 describe("instalador", () => {
-  const paths = { node: "/usr/local/bin/node", root: "/repo", home: "/home/user/.agent-router" };
+  const paths = { node: "/usr/local/bin/node", appRoot: "/repo", home: "/home/user/.agent-router" };
 
   it("los hooks de co apuntan al script de hooks y la statusline al envoltorio", () => {
     const s = buildCoSettings(paths);
@@ -187,8 +189,25 @@ describe("instalador", () => {
 
   it("deja escribir a los subagentes en sus worktrees sin preguntar (solo en sesiones co)", () => {
     const allow = buildCoSettings(paths).permissions.allow;
-    expect(allow).toEqual(expect.arrayContaining(["Edit(**/.claude/worktrees/**)", "Write(**/.claude/worktrees/**)"]));
-    expect(allow.every((r) => r.includes(".claude/worktrees/"))).toBe(true);
+    expect(allow).toContain("Edit(**/.claude/worktrees/**)");
+    expect(allow.some((r) => r.startsWith("Write("))).toBe(false);
+  });
+
+  it("permite borrar ramas ya mergeadas (git branch -d) sin preguntar, pero no -D", () => {
+    const allow = buildCoSettings(paths).permissions.allow;
+    expect(allow).toContain("Bash(git branch -d *)");
+    expect(allow.some((r) => r.includes("-D"))).toBe(false);
+  });
+
+  it("planStatuslineChain: respeta un statusline-next existente y informa de la encadenada", () => {
+    expect(planStatuslineChain({ userCmd: "node /x/mia.js", existingNext: "sh /h/statusline-chain.sh\n" }))
+      .toEqual({ write: false, chained: "sh /h/statusline-chain.sh" });
+    expect(planStatuslineChain({ userCmd: "node /x/mia.js", existingNext: "" })).toEqual({ write: true, chained: "node /x/mia.js" });
+    expect(planStatuslineChain({ userCmd: "node /x/mia.js", existingNext: "  \n" })).toEqual({ write: true, chained: "node /x/mia.js" });
+    expect(planStatuslineChain({ userCmd: "node /x/mia.js", existingNext: null })).toEqual({ write: true, chained: "node /x/mia.js" });
+    expect(planStatuslineChain({ userCmd: "node /r/bin/router-statusline.mjs", existingNext: null })).toEqual({ write: false, chained: null });
+    expect(planStatuslineChain({ userCmd: undefined, existingNext: null })).toEqual({ write: false, chained: null });
+    expect(planStatuslineChain({ userCmd: undefined, existingNext: "sh a.sh" })).toEqual({ write: false, chained: "sh a.sh" });
   });
 
   it("añade el alias co a .zshrc una sola vez y lo puede quitar", () => {
@@ -243,13 +262,26 @@ describe("instalador", () => {
 
 describe("especificación de servicios", () => {
   it("el servidor: node + server/index.mjs, ROUTER_HOME primero y log en home", () => {
-    expect(serverServiceSpec({ label: "l", node: "/n", root: "/r", home: "/h", env: { X: "1" } })).toEqual({ label: "l", argv: ["/n", "/r/server/index.mjs"], cwd: "/r", env: { ROUTER_HOME: "/h", X: "1" }, logFile: "/h/server.log" });
+    expect(serverServiceSpec({ label: "l", node: "/n", appRoot: "/r", home: "/h", env: { X: "1" } })).toEqual({ label: "l", argv: ["/n", "/r/server/index.mjs"], cwd: "/r", env: { ROUTER_HOME: "/h", X: "1" }, logFile: "/h/server.log" });
   });
   it("Laya: atada a host:puerto y con su log", () => {
     const s = layaServiceSpec({ label: "l", serveBin: "/v/bin/laya-serve", home: "/h", host: "127.0.0.1", port: 4318 });
     expect(s).toMatchObject({ argv: ["/v/bin/laya-serve"], logFile: "/h/laya.log" });
     expect(s.env).toMatchObject({ LAYA_HOST: "127.0.0.1", LAYA_PORT: "4318", HF_HOME: "/h/hf" });
     expect(s.env).not.toHaveProperty("LAYA_EXTRA_MODELS");
+  });
+  it("Laya warm-up: curl POST mínimo y válido al endpoint, cada 45 s, sin KeepAlive", () => {
+    const s = layaWarmSpec({ label: "com.x.laya-warm", home: "/h", url: "http://127.0.0.1:4318/v1/systemone", model: "encargos" });
+    expect(s).toMatchObject({ label: "com.x.laya-warm", startInterval: 45, logFile: "/h/laya-warm.log" });
+    expect(s.argv[0]).toBe("/usr/bin/curl");
+    expect(s.argv).toContain("http://127.0.0.1:4318/v1/systemone");
+    const body = JSON.parse(s.argv[s.argv.indexOf("-d") + 1]);
+    expect(body).toEqual(buildLayaRequest("calentamiento", "encargos"));
+    const plist = servicePlist(s);
+    expect(plist).toContain("<key>StartInterval</key><integer>45</integer>");
+    expect(plist).not.toContain("KeepAlive");
+    expect(plist).toContain("<key>RunAtLoad</key><true/>");
+    expect(servicePlist(layaServiceSpec({ label: "l", serveBin: "/b", home: "/h", host: "h", port: 1 }))).toContain("KeepAlive");
   });
   it("Laya: LAYA_EXTRA_MODELS desde la config, en el plist (darwin) y en la unidad (linux)", () => {
     const extraModels = { encargos: "/m/modelo" };

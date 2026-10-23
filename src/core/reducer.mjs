@@ -3,14 +3,14 @@
 
 import { addUsage, emptyUsage } from "./pricing.mjs";
 
-export const WORKERS = ["asistente", "programador"];
+export const WORKERS = ["asistente", "programador", "consultor"];
 const ROUTE_LABELS = ["asistente", "programador", "opus"];
 
-// Subagentes que no son de los roles (Explore, general-purpose, Plan...): cuelgan del orquestador.
+// Subagentes que no son del equipo (Explore, general-purpose, Plan...): nodo "Otros". El id "propio" se conserva por los runs guardados.
 export const OWN = "propio";
 
-// Nodo de un encargo según el tipo de subagente. Solo "asistente" y "programador" van a sus nodos; cualquier otro
-// tipo es del orquestador. Sin tipo (ejecuciones antiguas) se decide por el modelo, como antes.
+// Nodo de un encargo según el tipo de subagente. "asistente", "programador" y "consultor" van a sus nodos; cualquier otro
+// tipo (Explore, Plan, general-purpose...) va al nodo "Otros" (OWN). Sin tipo (ejecuciones antiguas) se decide por el modelo, como antes.
 export function nodeFor(agent, model) {
   if (WORKERS.includes(agent)) return agent;
   if (agent) return OWN;
@@ -21,7 +21,7 @@ export function nodeFor(agent, model) {
 function withTask(run, taskId, patch) {
   const prev = run.tasks[taskId] ?? {
     id: taskId, agent: "general-purpose", node: "programador", description: "", prompt: "",
-    status: "running", startedAt: null, endedAt: null, model: null, summary: "", result: "", usage: null,
+    status: "running", startedAt: null, endedAt: null, model: null, summary: "", result: "", usage: null, error: null,
     tokens: null, toolUses: null, durationMs: null, tools: 0, lastToolAt: null, lastActivityAt: null
   };
   const known = taskId in run.tasks;
@@ -73,7 +73,7 @@ export function reduceRun(run, ev) {
       status: "running", startedAt: ev.t, endedAt: null, exitCode: null,
       mainModel: null, orchestratorActiveAt: null, lastText: "",
       tasks: {}, taskOrder: [], pending: [], quota: null, usage: null, orchestratorUsage: null, errors: [], limit: null,
-      waiting: null, asked: [], shadow: null, blockedCount: 0, layaDecisions: 0, layaApplied: 0, updatedAt: ev.t
+      waiting: null, asked: [], shadow: null, blockedCount: 0, directEdits: ev.directEdits ?? 0, layaDecisions: 0, layaApplied: 0, updatedAt: ev.t
     };
   }
   if (!run) return null;
@@ -95,29 +95,47 @@ export function reduceRun(run, ev) {
       return withTask(base, ev.taskId, { lastToolAt: ev.t, lastActivityAt: ev.t, tools: (prev?.tools ?? 0) + 1 });
     }
     case "task_request":
-      return { ...base, pending: [...(base.pending ?? []), { agent: ev.agent, description: ev.description, prompt: ev.prompt }] };
+      return {
+        ...base,
+        pending: [...(base.pending ?? []), {
+          agent: ev.agent, description: ev.description, prompt: ev.prompt,
+          ...(ev.attempt != null ? { attempt: ev.attempt } : {}),
+          ...(ev.previousAgent ? { previousAgent: ev.previousAgent } : {}),
+          ...(ev.escalated ? { escalated: true } : {})
+        }]
+      };
+    case "direct_edit":
+      // Total acumulado de la sesión (los hooks son procesos sueltos: lo cuenta el hook y lo lleva el evento).
+      return { ...base, directEdits: ev.n ?? (base.directEdits ?? 0) + 1 };
     case "task_blocked":
       return { ...base, blockedCount: (base.blockedCount ?? 0) + 1 };
     case "laya_decision":
       return { ...base, layaDecisions: (base.layaDecisions ?? 0) + 1, layaApplied: (base.layaApplied ?? 0) + (ev.applied ? 1 : 0) };
     case "task_start": {
-      // Los hooks no traen la descripción en SubagentStart: se toma de la llamada a Agent pendiente.
+      // Los hooks no traen la descripción en SubagentStart: se toma de la llamada a Agent pendiente. Si un hook reescribió
+      // el subagent_type no coincide ninguna: se toma la más antigua y se anota qué agente se pidió.
       // Reanudar un subagente conocido (mismo agent_id, p. ej. SendMessage) no es un encargo nuevo: vuelve a
       // "running" conservando su descripción y sin gastar la llamada a Agent pendiente de otro encargo.
       const prevTask = base.tasks[ev.taskId];
       if (prevTask) return withTask(base, ev.taskId, { status: "running", startedAt: ev.t, endedAt: null, lastActivityAt: ev.t, lost: false });
       let { description, prompt } = ev;
       let pending = base.pending ?? [];
+      let extra = {};
       if (!description) {
-        const i = pending.findIndex((r) => r.agent === ev.agent);
+        let i = pending.findIndex((r) => r.agent === ev.agent);
+        const rewritten = i < 0 && pending.length > 0;
+        if (rewritten) i = 0;
         if (i >= 0) {
-          ({ description, prompt } = pending[i]);
+          const { agent: requested, description: d, prompt: pr, ...retry } = pending[i];
+          ({ description, prompt } = { description: d, prompt: pr });
+          extra = { ...retry, ...(rewritten ? { requestedAgent: requested } : {}) };
           pending = pending.filter((_, j) => j !== i);
         }
       }
+      const node = nodeFor(ev.agent, ev.model);
       return withTask({ ...base, pending }, ev.taskId, {
-        agent: ev.agent, node: nodeFor(ev.agent, null), description,
-        prompt, status: "running", startedAt: ev.t, lastActivityAt: ev.t
+        agent: ev.agent, node, description,
+        prompt, status: "running", startedAt: ev.t, lastActivityAt: ev.t, ...extra, ...(ev.model ? { model: ev.model } : {})
       });
     }
     case "task_model": {
@@ -134,11 +152,13 @@ export function reduceRun(run, ev) {
       });
     }
     case "task_end":
+      // Un cierre sin arranque (agentes internos de Claude Code en datos antiguos) no es un encargo.
+      if (!(ev.taskId in base.tasks)) return base;
       // Cierre por notificación (el orquestador recibe el fin del agente): solo cierra un encargo en marcha,
       // para no pisar el resultado de un SubagentStop que llegue antes.
       if (ev.source === "notification" && base.tasks[ev.taskId]?.status !== "running") return base;
       return withTask(base, ev.taskId, {
-        status: ev.status, endedAt: ev.t, lost: false, summary: ev.summary ?? "", result: ev.result ?? base.tasks[ev.taskId]?.result ?? "",
+        status: ev.status, endedAt: ev.t, lost: false, error: ev.error ?? null, ...(ev.permissionDenied ? { permissionDenied: true } : {}), ...(ev.model ? { model: ev.model } : {}), summary: ev.summary ?? "", result: ev.result ?? base.tasks[ev.taskId]?.result ?? "",
         tokens: ev.tokens ?? base.tasks[ev.taskId]?.tokens ?? null,
         toolUses: ev.toolUses ?? base.tasks[ev.taskId]?.toolUses ?? null,
         durationMs: ev.durationMs ?? base.tasks[ev.taskId]?.durationMs ?? null
@@ -174,9 +194,21 @@ export function reduceRun(run, ev) {
       return { ...base, routeLabel: ev.label === null ? null : { label: ev.label, t: ev.t } };
     case "compact":
       return { ...base, compactions: [...(base.compactions ?? []), { trigger: ev.trigger ?? null, pendingCount: ev.pendingCount ?? 0, t: ev.t }] };
-    case "context":
+    case "context": {
       // Contexto actual (último turno) según la statusline; se sobrescribe en cada cambio.
-      return { ...base, context: { tokens: ev.tokens, model: ev.model ?? null, window: ev.window ?? null, t: ev.t } };
+      // Los eventos por turno (del transcript) llevan `turn`: uno ya visto no cambia nada (releer no duplica ni retrocede).
+      if (ev.turn != null && ev.turn <= (run.context?.turn ?? 0)) return run;
+      const turn = ev.turn ?? run.context?.turn;
+      // El umbral de relevo lo trae la statusline; los eventos del transcript no lo llevan y conservan el último conocido.
+      const relevoAt = ev.relevoAt > 0 ? ev.relevoAt : run.context?.relevoAt;
+      return {
+        ...base,
+        context: {
+          tokens: ev.tokens, model: ev.model ?? null, window: ev.window ?? run.context?.window ?? null,
+          ...(relevoAt > 0 ? { relevoAt } : {}), ...(turn != null ? { turn } : {}), t: ev.t
+        }
+      };
+    }
     case "compact_stats": {
       // Datos del límite de compactación leídos del transcript; upsert por id (el mismo límite puede llegar dos veces).
       const byId = new Map((base.compactStats ?? []).map((c) => [c.id, c]));

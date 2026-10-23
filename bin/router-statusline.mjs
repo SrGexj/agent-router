@@ -6,6 +6,7 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { loadConfig } from "../src/config.mjs";
 import { createStore } from "../src/core/store.mjs";
@@ -14,6 +15,8 @@ import { contextFromStatusline, sameContext } from "../src/core/compaction.mjs";
 import { closeInterrupted, interruptedIn, quotaFromStatusline, sameQuota } from "../src/core/hooks.mjs";
 import { readFrom, readSince } from "../src/core/transcript.mjs";
 import { usageFromTranscript } from "../src/core/usage.mjs";
+import { withRelevoTag } from "../src/core/relevo.mjs";
+import { launchTelemetryFlush } from "../src/core/telemetry-flush.mjs";
 
 const config = loadConfig();
 const CACHE_MS = 30_000;
@@ -40,6 +43,7 @@ function runNext(command, input) {
 const raw = await readStdin();
 let quota = null;
 let sessionId = null;
+let contextTokens = null;
 try {
   const input = JSON.parse(raw);
   sessionId = input.session_id ?? null;
@@ -52,9 +56,11 @@ try {
       && interruptedIn(await readSince(input.transcript_path, session.transcriptOffset))) {
       let usage = null;
       try { usage = usageFromTranscript(await readFrom(input.transcript_path, session.transcriptOffset), { sidechain: false }); } catch { /* sin coste */ }
-      const closed = closeInterrupted(session, Date.now(), usage);
+      const closed = closeInterrupted(session, Date.now(), usage, quotaFromStatusline(input, Date.now(), config.profile) ?? (await sessions.loadQuota(sessionId)));
       for (const ev of closed.events) await store.append(closed.runId, ev);
       await sessions.save(sessionId, closed.session);
+      // Cierre por Esc: también dispara la telemetría (desacoplada; desactivada, no hace nada).
+      launchTelemetryFlush({ config, script: fileURLToPath(new URL("./router.mjs", import.meta.url)) });
     }
   }
 
@@ -70,7 +76,8 @@ try {
   }
 
   // Contexto actual (último turno) frente a la ventana: solo cuando cambia, para no escribir cada 2 s.
-  const ctxEvent = contextFromStatusline(input, Date.now());
+  const ctxEvent = contextFromStatusline(input, Date.now(), config.relevoTokens);
+  contextTokens = ctxEvent?.tokens ?? null;
   if (ctxEvent && sessionId) {
     const prev = await sessions.loadContext(sessionId);
     if (!sameContext(prev, ctxEvent)) {
@@ -98,8 +105,8 @@ if (next) {
     out = await runNext(next, raw);
     if (cacheFile) await writeFile(cacheFile, JSON.stringify({ hash, out, t: Date.now() })).catch(() => {});
   }
-  process.stdout.write(out);
+  process.stdout.write(withRelevoTag(out, contextTokens, config.relevoTokens));
 } else {
   const five = quota?.fiveHour ? ` · 5 h ${Math.round(quota.fiveHour.utilization * 100)} %` : "";
-  process.stdout.write(`${config.profileAlias}${five}`);
+  process.stdout.write(withRelevoTag(`${config.profileAlias}${five}`, contextTokens, config.relevoTokens));
 }

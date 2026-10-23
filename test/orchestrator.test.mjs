@@ -38,10 +38,57 @@ describe("buildOrchestratorPrompt", () => {
     expect(p).toMatch(/mismos archivos/);
     // Todo lo que entra en el contexto del orquestador se relee (lectura de caché) en cada paso siguiente.
     expect(p).toMatch(/contexto/);
-    expect(p).toMatch(/informe corto/i);
+    expect(p).toMatch(/informe corto en frases telegráficas/i);
+    expect(p).toMatch(/7\. El resumen de lo hecho no va al chat/);
+    expect(p).not.toMatch(/Termina con un resumen corto/);
     // Escribir la memoria con Bash (cat >>) pide permiso siempre; con Edit/Write lo cubre la regla de ajustes.
     expect(p).toMatch(/memoria.*Edit.*Write.*nunca con Bash/is);
     expect(p).toMatch(/sin datos de cuota/i);
+  });
+
+  it("no nombra a Opus: el orquestador puede ser otro modelo (co --model sonnet)", () => {
+    const p = buildOrchestratorPrompt({ agents, quota: null, now: NOW_MS });
+    expect(p).toMatch(/tú \(el orquestador\) analizas/);
+    expect(p).not.toMatch(/tú \(Opus\)/);
+  });
+
+  it("la regla del consultor: decisiones de diseño o riesgo y revisión delicada, sin recargar el prompt", () => {
+    const p = buildOrchestratorPrompt({ agents: { ...agents, consultor: { description: "Opus. Decide." } }, quota: null, now: NOW_MS });
+    expect(p).toContain("subagent_type: \"consultor\"");
+    expect(p).toMatch(/consultor \(Opus, solo lectura\).*decisiones de diseño o de riesgo.*revisión delicada/s);
+    expect(p).toMatch(/tú \(el orquestador\) analizas/);
+    const regla = /consultor \(Opus[^.]*\./.exec(p)[0];
+    expect(regla.length).toBeLessThan(400);
+  });
+
+  it("consultor obligatorio para planificar, elegir diseño, valorar riesgos y revisar lo delicado", () => {
+    const p = buildOrchestratorPrompt({ agents: { ...agents, consultor: { description: "Opus. Decide." } }, quota: null, now: NOW_MS });
+    expect(p).toMatch(/consultor es obligatorio/i);
+    expect(p).toMatch(/planificar/i);
+    expect(p).toMatch(/más de 3 pasos o dudas entre dos diseños, encárgalo a consultor en vez de resolverlo tú/);
+    expect(p).toContain("cambio trivial de una línea");
+  });
+
+  it("sin browser no hay sección Navegador; con id la añade", () => {
+    const base = buildOrchestratorPrompt({ agents, quota: null, now: NOW_MS });
+    expect(base).not.toContain("## Navegador");
+    expect(buildOrchestratorPrompt({ agents, quota: null, now: NOW_MS, browser: null })).toBe(base);
+    expect(buildOrchestratorPrompt({ agents, quota: null, now: NOW_MS, browser: { label: "x" } })).toBe(base);
+    const id = "11111111-2222-3333-4444-555555555555";
+    const p = buildOrchestratorPrompt({ agents, quota: null, now: NOW_MS, browser: { id, label: "Trabajo" } });
+    expect(p).toContain("## Navegador");
+    expect(p).toContain("Trabajo");
+    expect(p).toContain(`select_browser`);
+    expect(p).toContain(id);
+    expect(p).toMatch(/mcp__claude-in-chrome__/);
+    expect(p).toMatch(/asistente/);
+  });
+
+  it("refleja el reparto Opus/Sonnet/Haiku y la excepción de una línea", () => {
+    const p = buildOrchestratorPrompt({ agents, quota: null, now: NOW_MS });
+    expect(p).toMatch(/asistente \(Haiku\).*web.*navegador/s);
+    expect(p).toMatch(/programador \(Sonnet\) escribe código y tests/);
+    expect(p).toMatch(/una línea ya decidido.*directo/s);
   });
 
   it("pide ahorrar Opus cuando la cuota está alta", () => {
@@ -87,10 +134,17 @@ Haces tareas acotadas.
   it("los perfiles que trae el router son válidos y usan Haiku y Sonnet", async () => {
     const { loadAgents } = await import("../src/core/agents.mjs");
     const agents = await loadAgents(new URL("../src/agents", import.meta.url).pathname);
-    expect(Object.keys(agents)).toEqual(["asistente", "programador"]);
+    expect(Object.keys(agents)).toEqual(["asistente", "consultor", "programador"]);
     expect(agents.asistente.model).toBe("haiku");
+    expect(agents.consultor.model).toBe("opus");
+    expect(agents.consultor.tools).toEqual(["Read", "Grep", "Glob", "WebSearch", "WebFetch"]);
+    expect(agents.consultor.prompt).toMatch(/no edit/i);
     expect(agents.programador.model).toBe("sonnet");
     expect(agents.asistente.prompt.length).toBeGreaterThan(50);
+    // Web y navegador: forma documentada (comodín por servidor MCP).
+    expect(agents.asistente.tools).toEqual(expect.arrayContaining(["WebSearch", "WebFetch", "mcp__claude-in-chrome__*", "mcp__chrome-devtools__*", "mcp__figma-console__*", "mcp__claude_ai_Figma__*", "mcp__plugin_figma_figma__*"]));
+    expect(agents.asistente.description).toMatch(/leer diseños de Figma y resumirlos/);
+    expect(agents.asistente.description).toMatch(/buscar en la web.*probar webs y apps en navegador o simulador/);
   });
 
   it("monta el objeto para --agents", () => {

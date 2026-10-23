@@ -232,7 +232,7 @@ describe("buildTelemetry: resumen de Laya", () => {
   });
 
   it("SENTINELA: choice, confidence, requested, toolUseId y errores no se filtran", () => {
-    const d = build(withLaya(layaEv({ choice: `${S}-choice`, requested: `${S}-req`, confidence: 0.123456, error: `${S} msg`, errorKind: `${S}-kind`, layaModel: `${S}/modelo` })));
+    const d = build(withLaya(layaEv({ choice: `${S}-choice`, requested: `${S}-req`, confidence: 0.123456, error: `${S} msg`, errorKind: `${S}-kind`, layaModel: `${S} modelo` })));
     const json = JSON.stringify(d.laya);
     expect(json).not.toContain(S);
     expect(json).not.toContain("0.1234");

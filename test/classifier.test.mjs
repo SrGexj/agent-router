@@ -229,6 +229,25 @@ describe("createShadowClassifier elige proveedor por config", () => {
     expect(createShadowClassifier({ shadow: { ...shadow, provider: "jev" }, apiKey: "", ...deps })).toBeNull();
     expect(createShadowClassifier({ shadow: { ...shadow, provider: "jev" }, apiKey: "k", ...deps }).classify).toBeTypeOf("function");
   });
+  it("laya con layaRoutingModel: la petición lleva ese modelo y el clasificador lo expone", async () => {
+    let body;
+    const fetch = async (_u, init) => { body = JSON.parse(init.body); return { ok: true, status: 200, json: async () => layaFixture }; };
+    const c = createShadowClassifier({ shadow, layaRoutingModel: "encargos", apiKey: "", fetch, now: Date.now });
+    expect(c.model).toBe("encargos");
+    const r = await c.classify("hola");
+    expect(body.model).toBe("encargos");
+    expect(r.model).toBe("encargos");
+  });
+  it("laya sin layaRoutingModel (o vacío): modelo base, como siempre", async () => {
+    for (const layaRoutingModel of [undefined, ""]) {
+      let body;
+      const fetch = async (_u, init) => { body = JSON.parse(init.body); return { ok: true, status: 200, json: async () => layaFixture }; };
+      const c = createShadowClassifier({ shadow, layaRoutingModel, apiKey: "", fetch, now: Date.now });
+      expect(c.model).toBe(LAYA_MODEL);
+      await c.classify("hola");
+      expect(body.model).toBe(LAYA_MODEL);
+    }
+  });
   it("proveedor desconocido: null", () => {
     expect(createShadowClassifier({ shadow: { ...shadow, provider: "x" }, apiKey: "k", ...deps })).toBeNull();
   });

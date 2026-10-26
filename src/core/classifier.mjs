@@ -115,8 +115,9 @@ export function createLayaClassifier({ url, fetch, now = Date.now, timeoutMs = L
 }
 
 // Elige el proveedor según la config. null = no hay con qué clasificar (p. ej. Jev sin clave).
-export function createShadowClassifier({ shadow, apiKey, fetch, now = Date.now }) {
-  if (shadow.provider === "laya") return createLayaClassifier({ url: shadow.layaUrl, fetch, now });
+// `layaRoutingModel`: checkpoint de laya-serve para el enrutado de encargos (solo Laya); vacío = el base.
+export function createShadowClassifier({ shadow, apiKey, fetch, now = Date.now, layaRoutingModel = "" }) {
+  if (shadow.provider === "laya") return createLayaClassifier({ url: shadow.layaUrl, fetch, now, ...(layaRoutingModel && { model: layaRoutingModel }) });
   if (shadow.provider === "jev" && apiKey) return createOpenRouterClassifier({ apiKey, model: shadow.model, fetch, now, timeoutMs: shadow.timeoutMs });
   return null;
 }

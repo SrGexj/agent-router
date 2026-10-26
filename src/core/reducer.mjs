@@ -184,7 +184,7 @@ export function reduceRun(run, ev) {
       return {
         ...base, shadow: {
           model: ev.model ?? null, choice: ev.choice ?? null, confidence: ev.confidence ?? null, reason: ev.reason ?? null,
-          latencyMs: ev.latencyMs ?? null, costUsd: ev.costUsd ?? null, error: ev.error ?? null, t: ev.t,
+          latencyMs: ev.latencyMs ?? null, costUsd: ev.costUsd ?? null, error: ev.error ?? null, ...(ev.errorKind ? { errorKind: ev.errorKind } : {}), t: ev.t,
           ...(ev.na ? { na: true } : {})
         }
       };

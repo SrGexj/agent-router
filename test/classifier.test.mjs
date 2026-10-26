@@ -231,7 +231,7 @@ describe("createShadowClassifier elige proveedor por config", () => {
   });
   it("laya con layaRoutingModel: la petición lleva ese modelo y el clasificador lo expone", async () => {
     let body;
-    const fetch = async (_u, init) => { body = JSON.parse(init.body); return { ok: true, status: 200, json: async () => layaFixture }; };
+    const fetch = async (_u, init) => { body = JSON.parse(init.body); return { ok: true, status: 200, json: async () => ({ ...layaFixture, routing: { model: "encargos" } }) }; };
     const c = createShadowClassifier({ shadow, layaRoutingModel: "encargos", apiKey: "", fetch, now: Date.now });
     expect(c.model).toBe("encargos");
     const r = await c.classify("hola");
@@ -256,5 +256,44 @@ describe("createShadowClassifier elige proveedor por config", () => {
 describe("precio de Laya", () => {
   it("cuesta 0 $", () => {
     expect(costOf(LAYA_MODEL, { input: 1e6, output: 1e6, cacheRead: 0, cacheWrite5m: 0, cacheWrite1h: 0 })).toBe(0);
+  });
+});
+
+describe("modelo desconocido en laya-serve (routing.model)", () => {
+  const withRouting = (m) => ({ ...layaFixture, routing: { ...layaFixture.routing, model: m } });
+  const make = (fetch, extra = {}) => createLayaClassifier({ url: "u", fetch, now: (() => { let n = 0; return () => (n += 5); })(), ...extra });
+  const ok = (body) => async () => ({ ok: true, status: 200, json: async () => body });
+  it("pedido = respondido: sin error y con ese modelo", async () => {
+    const r = await make(ok(withRouting("encargos")), { model: "encargos" }).classify("x");
+    expect(r.model).toBe("encargos");
+    expect(r.errorKind).toBeUndefined();
+    expect(r.error).toBeUndefined();
+  });
+  it("pedido distinto del respondido: guarda el real y marca modelo_desconocido, sin perder la elección", async () => {
+    const r = await make(ok(withRouting("multilingual")), { model: "noexiste" }).classify("x");
+    expect(r).toMatchObject({ choice: "programador", model: "multilingual", errorKind: "modelo_desconocido" });
+    expect(r.error).toMatch(/noexiste.*multilingual/);
+  });
+  it("sin routing en la respuesta (LAYA_JEV_STRICT) o con modelo por defecto con barra: como antes", async () => {
+    const sin = { ...layaFixture, routing: undefined };
+    const a = await make(ok(sin), { model: "encargos" }).classify("x");
+    expect(a).toMatchObject({ model: "encargos" });
+    expect(a.errorKind).toBeUndefined();
+    const b = await make(ok(layaFixture)).classify("x");
+    expect(b).toMatchObject({ model: LAYA_MODEL });
+    expect(b.errorKind).toBeUndefined();
+  });
+  it("runShadow guarda el modelo real y el errorKind", async () => {
+    const events = [];
+    const store = { append: async (_id, e) => { events.push(e); } };
+    const classifier = make(ok(withRouting("multilingual")), { model: "noexiste" });
+    await runShadow({ classifier, store, runId: "r", prompt: "p", model: "noexiste", now: () => 1 });
+    expect(events[0]).toMatchObject({ type: "shadow_route", model: "multilingual", choice: "programador", errorKind: "modelo_desconocido" });
+    expect(events[0].error).toMatch(/noexiste/);
+    const good = [];
+    await runShadow({ classifier: make(ok(withRouting("encargos")), { model: "encargos" }), store: { append: async (_i, e) => { good.push(e); } }, runId: "r", prompt: "p", model: "encargos", now: () => 1 });
+    expect(good[0].model).toBe("encargos");
+    expect(good[0].error).toBeUndefined();
+    expect(good[0].errorKind).toBeUndefined();
   });
 });

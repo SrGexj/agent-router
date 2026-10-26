@@ -14,7 +14,10 @@ export async function runShadow({ classifier, store, runId, prompt, model, now =
   let event;
   try {
     const r = await classifier.classify(prompt);
-    event = { type: "shadow_route", model, choice: r.choice, confidence: r.confidence ?? null, reason: r.reason ?? null, latencyMs: r.latencyMs ?? null, costUsd: r.costUsd ?? null, t: now() };
+    event = {
+      type: "shadow_route", model: r.model ?? model, choice: r.choice, confidence: r.confidence ?? null, reason: r.reason ?? null, latencyMs: r.latencyMs ?? null, costUsd: r.costUsd ?? null,
+      ...(r.error && r.errorKind ? { error: r.error, errorKind: r.errorKind } : {}), t: now()
+    };
   } catch (e) {
     event = { type: "shadow_route", model, choice: null, error: String(e?.message ?? "error").slice(0, 120), latencyMs: now() - t0, t: now() };
   }

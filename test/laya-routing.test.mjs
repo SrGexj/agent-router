@@ -80,6 +80,13 @@ describe("routeAgent", () => {
     const bad = await routeAgent({ payload: pre(input), mode: "shadow", classifier: { model: "encargos", classify: async () => { throw err; } }, now: () => 1 });
     expect(bad.event).toMatchObject({ layaModel: "encargos", error: "laya no disponible", errorKind: "connection" });
   });
+  it("modelo desconocido: registra la decisión con el modelo real y errorKind, sin aplicar el downgrade", async () => {
+    const r = { choice: "asistente", confidence: 0.99, latencyMs: 3, model: "multilingual", error: "modelo desconocido: pedido noexiste, respondió multilingual", errorKind: "modelo_desconocido" };
+    const out = await routeAgent({ payload: pre({ ...input, subagent_type: "programador" }), mode: "downgrade", threshold: 0.9, classifier: { model: "noexiste", classify: async () => r }, now: () => 1 });
+    expect(out.output).toBeNull();
+    expect(out.event).toMatchObject({ choice: "asistente", layaModel: "multilingual", applied: false, errorKind: "modelo_desconocido" });
+    expect(out.event.error).toMatch(/noexiste/);
+  });
   it("timeout exterior sin clasificar: errorKind timeout", async () => {
     const out = await routeAgent({ payload: pre(input), mode: "shadow", classifier: { classify: () => new Promise(() => {}) }, timeoutMs: 20, now: () => 1 });
     expect(out.event).toMatchObject({ error: "timeout", errorKind: "timeout" });

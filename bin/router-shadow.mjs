@@ -5,7 +5,7 @@ import { appendFile, mkdir, readFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { loadConfig } from "../src/config.mjs";
 import { createStore } from "../src/core/store.mjs";
-import { createShadowClassifier, LAYA_MODEL } from "../src/core/classifier.mjs";
+import { createShadowClassifier } from "../src/core/classifier.mjs";
 import { runShadow } from "../src/core/shadow.mjs";
 
 const config = loadConfig();
@@ -16,8 +16,8 @@ try {
   await unlink(file).catch(() => {});
   if (config.shadow.enabled) {
     const apiKey = config.shadow.provider === "jev" ? (await readFile(config.shadow.keyPath, "utf8").catch(() => "")).trim() : "";
-    const classifier = createShadowClassifier({ shadow: config.shadow, apiKey, fetch: globalThis.fetch, now: Date.now });
-    const model = config.shadow.provider === "laya" ? LAYA_MODEL : config.shadow.model;
+    const classifier = createShadowClassifier({ shadow: config.shadow, apiKey, fetch: globalThis.fetch, now: Date.now, layaRoutingModel: config.layaRoutingModel });
+    const model = classifier?.model ?? config.shadow.model;
     if (classifier) await runShadow({ classifier, store: createStore({ runsDir: config.runsDir }), runId, prompt, model });
   }
 } catch (e) {

@@ -7,7 +7,7 @@ import { reduceEvents } from "./reducer.mjs";
 import { CHOICES } from "./classifier.mjs";
 import { defaultPlatform } from "./platform/index.mjs";
 import {
-  trainingRows, addSeeds, parseLocalSeeds, toCsv, toJsonl, splitRows, distribution, classWarnings, checkMinimum, scoreEval, compareScores, layaTrainArgs, rowsFromJsonl,
+  trainingRows, addSeeds, parseLocalSeeds, toCsv, toJsonl, splitRows, distribution, classWarnings, checkMinimum, scoreEval, compareScores, layaTrainArgs, rowsFromJsonl, oversample, sourceBreakdown, TRAIN_DEFAULTS,
   DEFAULT_EVAL_RATIO, MIN_PER_CLASS
 } from "./laya-data.mjs";
 
@@ -32,6 +32,13 @@ function describeDist(dist, rows, log) {
   for (const c of CHOICES) log(`  ${c.padEnd(12)} ${dist[c]}`);
   const scarce = classWarnings(dist, MIN_PER_CLASS);
   if (scarce.length) log(`Aviso: ${scarce.map((c) => `${c} (${dist[c]})`).join(", ")} con menos de ${MIN_PER_CLASS} ejemplos; el ajuste será poco fiable.`);
+}
+
+function describeSources(label, rows, log) {
+  if (!rows.some((r) => r.source)) return;
+  const b = sourceBreakdown(rows);
+  log(`${label} por origen:`);
+  for (const c of CHOICES) log(`  ${c.padEnd(12)} ${b[c].usuario} a mano, ${b[c].auto} auto, ${b[c].semilla} semilla`);
 }
 
 async function writeSplit(rows, trainPath, evalPath, ratio) {
@@ -108,8 +115,16 @@ async function prepareData({ store, opts, dataDir, seedsFile, log }) {
   // Para entrenar y evaluar se usa JSONL con el mismo estado y preguntas que el servicio (el CSV de laya-train sintetiza otra pregunta).
   const trainJsonl = join(dataDir, "train.jsonl");
   const evalJsonl = join(dataDir, "eval.jsonl");
-  const train = seeded.train;
   const ev = seeded.eval;
+  // Sin esto las clases escasas quedan aplastadas por la mayoritaria; el eval no se toca para que mida la realidad.
+  const before = distribution(seeded.train);
+  const train = oversample(seeded.train, { seed: opts.seed ?? 0 });
+  const after = distribution(train);
+  const fmt = (d) => CHOICES.map((c) => `${c} ${d[c]}`).join(", ");
+  log(`Train antes de balancear: ${fmt(before)}`);
+  log(`Train después de balancear: ${fmt(after)}`);
+  describeSources("Train", seeded.train, log);
+  describeSources("Eval", ev, log);
   await writeFile(trainJsonl, toJsonl(train));
   await writeFile(evalJsonl, toJsonl(ev));
   log(`Datos en ${dataDir} (${train.length} para entrenar, ${ev.length} para evaluar)`);
@@ -126,7 +141,7 @@ export async function layaEntrenar({ store, config, exec, now, opts, log = conso
   await mkdir(dataDir, { recursive: true });
 
   log("Ejecutando laya-train…");
-  const trainRes = await exec(join(config.laya.venvDir, "bin/laya-train"), layaTrainArgs({ data: trainJsonl, out: modelDir, base: config.laya.base, dryRun: opts.dryRun, microBatch: opts.microBatch, gradAccum: opts.gradAccum, maxLen: opts.maxLen }), { env: layaEnv(config) });
+  const trainRes = await exec(join(config.laya.venvDir, "bin/laya-train"), layaTrainArgs({ data: trainJsonl, out: modelDir, base: config.laya.base, dryRun: opts.dryRun, microBatch: opts.microBatch, gradAccum: opts.gradAccum ?? TRAIN_DEFAULTS.gradAccum, maxLen: opts.maxLen, loss: opts.loss ?? TRAIN_DEFAULTS.loss, epochs: opts.epochs ?? TRAIN_DEFAULTS.epochs, eval: evalJsonl, freezeEncoder: opts.freezeEncoder, seed: opts.seed }), { env: layaEnv(config) });
   if (trainRes.code !== 0) {
     log(`laya-train falló (código ${trainRes.code}).`);
     return { failed: true, outDir, dist };

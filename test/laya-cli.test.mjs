@@ -25,7 +25,11 @@ describe("parseLayaArgs", () => {
     expect(parseLayaArgs(["laya-entrenar", "--forzar", "--simular"])).toMatchObject({ command: "laya-entrenar", force: true, dryRun: true });
   });
   it("laya-entrenar: --datos y parámetros de memoria, con valores seguros por defecto", () => {
-    expect(parseLayaArgs(["laya-entrenar"])).toMatchObject({ datos: null, microBatch: 1, gradAccum: 64, maxLen: 512 });
+    expect(parseLayaArgs(["laya-entrenar"])).toMatchObject({ datos: null, microBatch: 1, gradAccum: 8, maxLen: 512, loss: "soft-ce", epochs: 6, freezeEncoder: false, seed: null });
+    expect(parseLayaArgs(["laya-entrenar", "--loss", "rlcd", "--epochs", "3", "--freeze-encoder", "--seed", "0"])).toMatchObject({ loss: "rlcd", epochs: 3, freezeEncoder: true, seed: 0 });
+    expect(() => parseLayaArgs(["laya-entrenar", "--loss", "mse"])).toThrow(/--loss/);
+    expect(() => parseLayaArgs(["laya-entrenar", "--seed", "-1"])).toThrow(/--seed/);
+    expect(() => parseLayaArgs(["laya-entrenar", "--epochs", "0"])).toThrow(/--epochs/);
     expect(parseLayaArgs(["laya-entrenar", "--datos", "/d", "--micro-batch", "2", "--grad-accum", "32", "--max-len", "256"]))
       .toMatchObject({ datos: "/d", microBatch: 2, gradAccum: 32, maxLen: 256 });
     expect(() => parseLayaArgs(["laya-entrenar", "--micro-batch", "0"])).toThrow(/--micro-batch/);
@@ -128,7 +132,7 @@ describe("laya-entrenar", () => {
     expect(evalRows.filter((r) => r.expected.route === "opus").length).toBeGreaterThan(0);
     expect(evalRows.filter((r) => r.expected.route === "asistente").length).toBeGreaterThan(0);
     const csv = await readFile(join(res.outDir, "datos", "train.csv"), "utf8");
-    expect(csv.split("\n").filter((l) => l.includes(",semilla,")).length).toBe(trainRows.filter((r) => !r.state.body.startsWith("Tarea ")).length);
+    expect(csv.split("\n").filter((l) => l.includes(",semilla,")).length).toBe([...t].filter((b) => !b.startsWith("Tarea ")).length);
   });
   it("el mínimo sigue valiendo: sin suficientes ejemplos totales se niega aunque haya semillas", async () => {
     await seed("a", 2, "asistente");
@@ -209,6 +213,59 @@ describe("laya-entrenar", () => {
     expect(a.slice(a.indexOf("--micro-batch"), a.indexOf("--micro-batch") + 2)).toEqual(["--micro-batch", "2"]);
     expect(a[a.indexOf("--grad-accum") + 1]).toBe("32");
     expect(a[a.indexOf("--max-len") + 1]).toBe("256");
+  });
+
+  it("sin opciones pasa los valores por defecto: soft-ce, grad-accum 8, 6 épocas y --eval con el eval.jsonl", async () => {
+    await seed("a", 6, "asistente");
+    const calls = [];
+    const res = await layaEntrenar({ store, config, exec: fakeExec(calls), now: NOW, opts: { force: true, dryRun: true, profile: "todos", datos: null }, log });
+    const a = calls[0].args;
+    expect(a[a.indexOf("--loss") + 1]).toBe("soft-ce");
+    expect(a[a.indexOf("--grad-accum") + 1]).toBe("8");
+    expect(a[a.indexOf("--epochs") + 1]).toBe("6");
+    expect(a[a.indexOf("--eval") + 1]).toBe(join(res.outDir, "datos", "eval.jsonl"));
+    expect(a).not.toContain("--freeze-encoder");
+  });
+
+  it("sobrescribe loss, epochs, seed y freeze-encoder desde opts", async () => {
+    await seed("a", 6, "asistente");
+    const calls = [];
+    await layaEntrenar({ store, config, exec: fakeExec(calls), now: NOW, opts: { ...opts, force: true, dryRun: true, loss: "rlcd", epochs: 2, seed: 5, freezeEncoder: true }, log });
+    const a = calls[0].args;
+    expect(a[a.indexOf("--loss") + 1]).toBe("rlcd");
+    expect(a[a.indexOf("--epochs") + 1]).toBe("2");
+    expect(a[a.indexOf("--seed") + 1]).toBe("5");
+    expect(a).toContain("--freeze-encoder");
+  });
+
+  it("balancea solo el train con oversampling, deja el eval intacto y loguea antes/después y manual/auto", async () => {
+    await seed("a", 20, "asistente");
+    await seed("p", 40, "programador");
+    await seed("o", 10, "opus");
+    const calls = [];
+    const res = await layaEntrenar({ store, config, exec: fakeExec(calls), now: NOW, opts: { ...opts, force: true, dryRun: true }, log });
+    const read = async (f) => (await readFile(join(res.outDir, "datos", f), "utf8")).trim().split("\n").map((l) => JSON.parse(l).expected.route);
+    const trainLabels = await read("train.jsonl");
+    const evalLabels = await read("eval.jsonl");
+    const count = (arr, c) => arr.filter((x) => x === c).length;
+    const max = Math.max(...["asistente", "programador", "opus"].map((c) => count(trainLabels, c)));
+    for (const c of ["asistente", "programador", "opus"]) expect(count(trainLabels, c)).toBe(max);
+    // eval sin duplicados: lo que hay en eval.csv
+    const evCsv = (await readFile(join(res.outDir, "datos", "eval.csv"), "utf8")).trim().split("\n").length - 1;
+    expect(evalLabels).toHaveLength(evCsv);
+    const text = logs.join("\n");
+    expect(text).toMatch(/Train antes de balancear/);
+    expect(text).toMatch(/Train después de balancear/);
+    expect(text).toMatch(/Train por origen/);
+    expect(text).toMatch(/Eval por origen/);
+    expect(text).toMatch(/asistente\D+0 a mano, [1-9]\d* auto/);
+  });
+
+  it("cuenta las correcciones manuales por clase en el log", async () => {
+    await seed("a", 6, "asistente");
+    await store.append("2026a000-1-a", { type: "route_label", label: "opus", t: 9 });
+    await layaEntrenar({ store, config, exec: fakeExec([]), now: NOW, opts: { ...opts, force: true, dryRun: true }, log });
+    expect(logs.join("\n")).toMatch(/opus\D+1 a mano, 0 auto/);
   });
 
   it("--datos usa train.jsonl y test.jsonl externos sin leer el store", async () => {

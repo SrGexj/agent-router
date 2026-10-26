@@ -100,6 +100,15 @@ export function createOpenRouterClassifier({ apiKey, model, fetch, now = Date.no
   return { classify };
 }
 
+// laya-serve acepta con 200 un nombre de checkpoint desconocido (sin barra) y responde con el base; lo único que lo delata es
+// `routing.model` (el checkpoint que contestó de verdad). Pedido ≠ respondido → el modelo real y un error "modelo_desconocido".
+// Sin `routing` (LAYA_JEV_STRICT) o con nombre de repo (lleva barra: su `routing.model` es el alias corto) no se comprueba nada.
+export function unknownModel(requested, json) {
+  const used = json?.routing?.model;
+  if (typeof used !== "string" || !used || requested.includes("/") || used === requested) return {};
+  return { model: used, error: `modelo desconocido: pedido ${requested}, respondió ${used}`.slice(0, 120), errorKind: "modelo_desconocido" };
+}
+
 // Laya en local: sin clave, coste 0. Servidor caído, lento o con 5xx → "laya no disponible".
 // `model`: nombre de un checkpoint registrado en laya-serve (p. ej. vía LAYA_EXTRA_MODELS); por defecto el multilingüe.
 export function createLayaClassifier({ url, fetch, now = Date.now, timeoutMs = LAYA_TIMEOUT_MS, model = LAYA_MODEL }) {
@@ -108,8 +117,9 @@ export function createLayaClassifier({ url, fetch, now = Date.now, timeoutMs = L
     const t0 = now();
     const res = await postJson({ url, body: buildLayaRequest(prompt, model), fetch, timeoutMs, netMsg: () => "laya no disponible" });
     if (!res.ok) throw Object.assign(res.status >= 500 ? down() : new Error(`HTTP ${res.status}`), { errorKind: "http" });
-    const parsed = parseClassifier(await readJson(res));
-    return { ...parsed, costUsd: 0, model, latencyMs: now() - t0 };
+    const json = await readJson(res);
+    const parsed = parseClassifier(json);
+    return { ...parsed, costUsd: 0, model, ...unknownModel(model, json), latencyMs: now() - t0 };
   }
   return { classify, model };
 }

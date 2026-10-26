@@ -57,13 +57,16 @@ export async function routeAgent({ payload, mode, threshold = 0.9, classifier, t
   let errorKind = null;
   try {
     result = await withTimeout(classifier.classify(layaText(input)), timeoutMs);
+    // Avisos que no impiden la decisión (p. ej. modelo desconocido): se registran con el resultado.
+    if (result?.error && result.errorKind) { error = result.error; errorKind = result.errorKind; }
   } catch (e) {
     error = String(e?.message ?? "error").slice(0, 120);
     errorKind = e?.errorKind ?? (error === "timeout" ? "timeout" : null);
   }
-  const { applied } = decideRouting({ mode, requested, result, threshold });
+  // Con el modelo equivocado no se baja de nivel: el base no es el entrenado que se quería medir.
+  const { applied } = errorKind === "modelo_desconocido" ? { applied: false } : decideRouting({ mode, requested, result, threshold });
   const t = now();
-  const event = layaDecisionEvent({ payload, requested, result, latencyMs: result?.latencyMs ?? t - t0, mode, applied, t, error, errorKind, layaModel: classifier.model });
+  const event = layaDecisionEvent({ payload, requested, result, latencyMs: result?.latencyMs ?? t - t0, mode, applied, t, error, errorKind, layaModel: result?.model ?? classifier.model });
   if (!applied) return { event, output: null, input };
   const updated = { ...input, subagent_type: "asistente" };
   return { event, output: updatedInputOutput(updated), input: updated };

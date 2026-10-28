@@ -55,6 +55,9 @@ export async function layaDatos({ store, opts, cwd = process.cwd(), log = consol
   const rows = trainingRows(await loadRuns(store), { profile: opts.profile });
   const trainPath = resolve(cwd, opts.out ?? "laya-datos.csv");
   const evalPath = evalPathFor(trainPath);
+  if (!opts.force) {
+    for (const f of [trainPath, evalPath]) if (await stat(f).then(() => true, () => false)) throw new Error(`${f} ya existe; usa otra ruta con --out o --forzar para pisarlo.`);
+  }
   const { train, eval: ev } = await writeSplit(rows, trainPath, evalPath, DEFAULT_EVAL_RATIO);
   const dist = distribution(rows);
   describeDist(dist, rows, log);

@@ -24,7 +24,7 @@ Copia estable:
   router actualizar                           Pasa ~/.agent-router/app a origin/main (fetch), reconstruye y reinicia el dashboard.
 
 Ajustar Laya con tus datos:
-  router laya-datos [--out archivo.csv] [--perfil <id>|todos]   Exporta las ejecuciones etiquetadas (y un CSV de evaluación aparte).
+  router laya-datos [--out archivo.csv] [--perfil <id>|todos] [--forzar]   Exporta las ejecuciones etiquetadas (y un CSV de evaluación aparte); no pisa archivos existentes sin --forzar.
   router laya-entrenar [--perfil P] [--forzar] [--simular]                  Exporta, ajusta Laya con laya-train y compara con el modelo base.
       [--datos CARPETA]   usa CARPETA/train.jsonl y test.jsonl en vez de las ejecuciones guardadas
       [--micro-batch N] [--grad-accum N] [--max-len N]   memoria (por defecto 1, 8 y 512)
@@ -94,7 +94,7 @@ export function parseLayaArgs(argv) {
     else if (a === "--perfil" && command !== "laya-usar") {
       out.profile = value(a, ++i);
       if (!/^[a-z0-9-]+$/i.test(out.profile)) throw new Error(`Valor de --perfil no válido: ${out.profile}.`);
-    } else if (a === "--forzar" && command === "laya-entrenar") out.force = true;
+    } else if (a === "--forzar" && command !== "laya-usar") out.force = true;
     else if (a === "--simular" && command === "laya-entrenar") out.dryRun = true;
     else if (a === "--datos" && command === "laya-entrenar") out.datos = value(a, ++i);
     else if (a === "--micro-batch" && command === "laya-entrenar") out.microBatch = posInt(a, ++i);

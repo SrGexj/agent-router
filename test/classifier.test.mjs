@@ -297,3 +297,46 @@ describe("modelo desconocido en laya-serve (routing.model)", () => {
     expect(good[0].errorKind).toBeUndefined();
   });
 });
+
+import { buildLayaContext, LAYA_CONTEXT_VERSION } from "../src/core/classifier.mjs";
+
+describe("buildLayaContext", () => {
+  it("versión del formato fija y fuera del texto", () => {
+    expect(LAYA_CONTEXT_VERSION).toBe("ctx=v1");
+    expect(buildLayaContext({ prompt: "hola" })).not.toContain("ctx=v1");
+  });
+  it("formato exacto con anterior, mensaje primero", () => {
+    const t = buildLayaContext({ prompt: "arréglalo", prevTask: "crea el login", prevRoute: "programador" });
+    expect(t).toBe("[mensaje] arréglalo\n[anterior] ruta=programador\n[encargo anterior] crea el login");
+    expect(t.startsWith("[mensaje] ")).toBe(true);
+  });
+  it("sin anterior: ruta=sin_anterior y sin línea de encargo", () => {
+    expect(buildLayaContext({ prompt: "hola" })).toBe("[mensaje] hola\n[anterior] ruta=sin_anterior");
+    expect(buildLayaContext({ prompt: "hola", prevTask: null, prevRoute: "opus" })).toBe("[mensaje] hola\n[anterior] ruta=sin_anterior");
+  });
+  it("anterior sin ruta conocida: ninguna", () => {
+    expect(buildLayaContext({ prompt: "x", prevTask: "y", prevRoute: null })).toBe("[mensaje] x\n[anterior] ruta=ninguna\n[encargo anterior] y");
+    expect(buildLayaContext({ prompt: "x", prevTask: "y", prevRoute: "raro" })).toContain("ruta=ninguna");
+  });
+  it("recorta por la derecha: 1500 / 600 / 600", () => {
+    const t = buildLayaContext({ prompt: "a".repeat(2000), prevTask: "b".repeat(900), prevRoute: "opus", prevReply: "c".repeat(900) });
+    expect(t).toBe(`[mensaje] ${"a".repeat(1500)}\n[anterior] ruta=opus\n[encargo anterior] ${"b".repeat(600)}\n[orquestador] ${"c".repeat(600)}`);
+  });
+  it("sanea las tres partes", () => {
+    const p = (n) => `<pasted_content id="1">${Array(n).fill("secreto").join("\n")}</pasted_content>`;
+    const t = buildLayaContext({ prompt: p(2), prevTask: p(3), prevRoute: "opus", prevReply: p(4) });
+    expect(t).not.toContain("secreto");
+    expect(t).toContain("[mensaje] [texto pegado: 2 líneas]");
+    expect(t).toContain("[encargo anterior] [texto pegado: 3 líneas]");
+    expect(t).toContain("[orquestador] [texto pegado: 4 líneas]");
+  });
+  it("prevReply opcional: sin él no hay línea", () => {
+    expect(buildLayaContext({ prompt: "x", prevTask: "y", prevRoute: "opus" })).not.toContain("[orquestador]");
+    expect(buildLayaContext({ prompt: "x", prevTask: "y", prevRoute: "opus", prevReply: "" })).not.toContain("[orquestador]");
+    expect(buildLayaContext({ prompt: "x", prevTask: "y", prevRoute: "opus", prevReply: "hecho" }).endsWith("\n[orquestador] hecho")).toBe(true);
+  });
+  it("determinista", () => {
+    const a = { prompt: "x", prevTask: "y", prevRoute: "asistente", prevReply: "z" };
+    expect(buildLayaContext(a)).toBe(buildLayaContext({ ...a }));
+  });
+});

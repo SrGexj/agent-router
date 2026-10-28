@@ -1,8 +1,8 @@
 // Datos para ajustar Laya con las ejecuciones del usuario. Puro: sin E/S ni reloj.
 // Texto = el mismo que recibe Laya en modo sombra (sanitizePrompt); etiqueta = trainingLabel (usuario o auto).
 import { createHash } from "node:crypto";
-import { CHOICES, buildLayaRequest, sanitizePrompt } from "./classifier.mjs";
-import { trainingLabel } from "./details.mjs";
+import { CHOICES, buildLayaRequest, buildLayaContext } from "./classifier.mjs";
+import { trainingLabel, actualRoute } from "./details.mjs";
 import { SEEDS } from "./laya-seeds.mjs";
 
 export const CSV_HEADER = "texto,etiqueta,perfil,fuente,runId";
@@ -12,23 +12,63 @@ export const MIN_PER_CLASS = 15;
 
 const profileOf = (run) => run?.profile || "trabajo";
 
-// Una fila por ejecución con etiqueta y texto, ordenada por runId para que la salida sea estable.
+const taskText = (run) => (typeof run.task === "string" ? run.task : run.task?.task ?? "");
+
+// Sesión de un run de hook: makeRunId = <marca>-<session_id[0:8]>-<seq> (hooks.mjs). Solo los runs de modo "sesion" tienen sesión;
+// los de `router` (pid-aleatorio) no se encadenan. Prefijo de 8 caracteres: colisión entre sesiones posible pero despreciable.
+const SESSION_ID = /^\d{8}T\d{6}Z-([^-]+)-\d+$/;
+export const sessionOf = (run) => (run?.mode === "sesion" ? SESSION_ID.exec(run.id ?? "")?.[1] ?? null : null);
+
+// Run anterior de la misma sesión: el último que empezó antes (por tiempo; runId desempata). Solo mira hacia atrás.
+function previousRuns(runs) {
+  const bySession = new Map();
+  for (const r of runs ?? []) {
+    const k = sessionOf(r);
+    if (k) bySession.set(k, [...(bySession.get(k) ?? []), r]);
+  }
+  const prev = new Map();
+  for (const list of bySession.values()) {
+    list.sort((a, b) => (a.startedAt ?? 0) - (b.startedAt ?? 0) || (a.id < b.id ? -1 : 1));
+    list.forEach((r, i) => { if (i > 0) prev.set(r.id, list[i - 1]); });
+  }
+  return prev;
+}
+
+// Ruta que el anterior ya tenía decidida cuando empezó este run: actualRoute (nunca la etiqueta del usuario, que en vivo no existe).
+// Si el anterior seguía abierto o cerró después del inicio de este run, no hay ruta conocida.
+function knownRoute(prev, run) {
+  if (prev.endedAt == null || (run.startedAt != null && prev.endedAt > run.startedAt)) return null;
+  return actualRoute(prev);
+}
+
+// Una fila por ejecución con etiqueta y texto (con el contexto del turno anterior), ordenada por runId para que la salida sea estable.
 export function trainingRows(runs, { profile = "todos" } = {}) {
+  const prevOf = previousRuns(runs);
   const rows = [];
   for (const run of runs ?? []) {
     if (profile !== "todos" && profileOf(run) !== profile) continue;
     const t = trainingLabel(run);
     if (!t) continue;
-    const text = sanitizePrompt(typeof run.task === "string" ? run.task : run.task?.task ?? "").trim();
+    if (!taskText(run).trim()) continue;
+    const prev = prevOf.get(run.id);
+    const text = buildLayaContext({
+      prompt: taskText(run),
+      prevTask: prev ? taskText(prev) : undefined,
+      prevRoute: prev ? knownRoute(prev, run) : undefined
+    });
     if (!text) continue;
-    rows.push({ text, label: t.label, profile: profileOf(run), source: t.source, runId: run.id });
+    const row = { text, label: t.label, profile: profileOf(run), source: t.source, runId: run.id };
+    const session = sessionOf(run);
+    if (session) row.session = session;
+    rows.push(row);
   }
   return rows.sort((a, b) => (a.runId < b.runId ? -1 : a.runId > b.runId ? 1 : 0));
 }
 
 // Una semilla sin etiqueta cuenta como opus (compatibilidad con las primeras semillas, que eran todas de opus).
 const DEFAULT_SEED_LABEL = "opus";
-const seedRow = (s) => ({ ...s, label: s.label ?? DEFAULT_SEED_LABEL, source: "semilla" });
+// El texto de la semilla pasa por buildLayaContext sin anterior; no se reescribe.
+const seedRow = (s) => ({ ...s, text: buildLayaContext({ prompt: s.text }), label: s.label ?? DEFAULT_SEED_LABEL, source: "semilla" });
 
 // Semillas locales (JSONL fuera del repo, una por línea {origin,label,text}): las líneas inválidas o con etiqueta fuera de CHOICES se saltan; sin etiqueta = opus.
 export function parseLocalSeeds(text) {
@@ -54,7 +94,7 @@ export function withSeeds(rows, local = [], evalRows = []) {
   const seen = new Set([...(rows ?? []), ...(evalRows ?? [])].map((r) => textKey(r.text)));
   const extra = [];
   for (const s of [...SEEDS, ...local]) {
-    const k = textKey(s.text);
+    const k = textKey(seedRow(s).text);
     if (seen.has(k)) continue;
     seen.add(k);
     extra.push(seedRow(s));
@@ -71,7 +111,7 @@ export function addSeeds(trainRows, evalRows, local = [], ratio = SEED_EVAL_RATI
   const train = [...(trainRows ?? [])];
   const ev = [...(evalRows ?? [])];
   for (const s of [...SEEDS, ...local]) {
-    const k = textKey(s.text);
+    const k = textKey(seedRow(s).text);
     if (seen.has(k)) continue;
     seen.add(k);
     (inEvalSet(k, ratio) ? ev : train).push(seedRow(s));
@@ -89,16 +129,18 @@ export function toCsv(rows) {
   return `${[CSV_HEADER, ...lines].join("\n")}\n`;
 }
 
-// Pertenece al conjunto de evaluación según un hash de la clave (el texto normalizado en splitRows): no cambia al llegar ejecuciones nuevas.
+// Pertenece al conjunto de evaluación según un hash de la clave (la sesión en splitRows; el texto normalizado en addSeeds): no cambia al llegar ejecuciones nuevas.
 export function inEvalSet(key, ratio = DEFAULT_EVAL_RATIO) {
   const h = createHash("sha256").update(String(key)).digest().readUInt32BE(0) / 2 ** 32;
   return h < ratio;
 }
 
+// Reparto agrupado por sesión: con contexto, runs vecinos comparten texto y una sesión partida filtraría datos al eval.
+// Clave = sesión de la fila (prefijo del runId); sin sesión, el runId (cada fila su propio grupo).
 export function splitRows(rows, ratio = DEFAULT_EVAL_RATIO) {
   const train = [];
   const ev = [];
-  for (const r of rows ?? []) (inEvalSet(r.text != null ? textKey(r.text) : r.runId, ratio) ? ev : train).push(r);
+  for (const r of rows ?? []) (inEvalSet(`sesion:${r.session ?? r.runId}`, ratio) ? ev : train).push(r);
   return { train, eval: ev };
 }
 

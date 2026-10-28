@@ -20,6 +20,24 @@ export function sanitizePrompt(text) {
     .slice(0, MAX_PROMPT);
 }
 
+// Versión del formato de buildLayaContext: sirve para versionar modelo y hook; no forma parte del texto.
+export const LAYA_CONTEXT_VERSION = "ctx=v1";
+const CTX_MAX = { message: 1500, task: 600, reply: 600 };
+const CTX_ROUTES = new Set(["programador", "asistente", "opus", "ninguna"]);
+const ctxPart = (text, max) => sanitizePrompt(text).trim().slice(0, max);
+
+// Texto que recibe Laya con el contexto del turno anterior. Puro. Sin prevTask (null/undefined) no hay anterior.
+export function buildLayaContext({ prompt, prevTask, prevRoute, prevReply } = {}) {
+  const lines = [`[mensaje] ${ctxPart(prompt, CTX_MAX.message)}`];
+  if (prevTask == null) return `${lines[0]}
+[anterior] ruta=sin_anterior`;
+  lines.push(`[anterior] ruta=${CTX_ROUTES.has(prevRoute) ? prevRoute : "ninguna"}`);
+  lines.push(`[encargo anterior] ${ctxPart(prevTask, CTX_MAX.task)}`);
+  const reply = ctxPart(prevReply, CTX_MAX.reply);
+  if (reply) lines.push(`[orquestador] ${reply}`);
+  return lines.join("\n");
+}
+
 const ROUTE_QUESTIONS = {
   route: {
     type: "choice",

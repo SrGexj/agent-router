@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { CHOICES } from "../src/core/classifier.mjs";
+import { CHOICES, buildLayaContext } from "../src/core/classifier.mjs";
+
+const ctx = (prompt) => buildLayaContext({ prompt });
+import { SEEDS } from "../src/core/laya-seeds.mjs";
 import {
   trainingRows, csvField, toCsv, CSV_HEADER, inEvalSet, splitRows, distribution, classWarnings, checkMinimum,
   toJsonl, withSeeds, addSeeds, SEED_EVAL_RATIO, parseLocalSeeds, scoreEval, compareScores, layaTrainArgs,
@@ -21,8 +24,8 @@ describe("trainingRows", () => {
       run("d", "   ", {})
     ];
     expect(trainingRows(runs)).toEqual([
-      { text: "Dime qué opinas", label: "opus", profile: "trabajo", source: "usuario", runId: "a" },
-      { text: "Revisa esto [texto pegado: 3 líneas]", label: "programador", profile: "trabajo", source: "auto", runId: "b" }
+      { text: "[mensaje] Dime qué opinas\n[anterior] ruta=sin_anterior", label: "opus", profile: "trabajo", source: "usuario", runId: "a" },
+      { text: "[mensaje] Revisa esto [texto pegado: 3 líneas]\n[anterior] ruta=sin_anterior", label: "programador", profile: "trabajo", source: "auto", runId: "b" }
     ]);
   });
   it("excluye runs sin subagente salvo corrección manual; consultor y propio entran como opus", () => {
@@ -78,20 +81,20 @@ describe("conjunto de evaluación", () => {
     expect(new Set([...train, ...ev].map((r) => r.runId)).size).toBe(100);
     expect(ev.length).toBeGreaterThan(5);
   });
-  it("mismo texto (con otro runId) cae siempre del mismo lado", () => {
-    const rows = Array.from({ length: 300 }, (_, i) => ({ text: `texto ${i % 60}`, label: "opus", runId: `id-${i}` }));
+  it("ninguna sesión queda en train y eval a la vez", () => {
+    const rows = Array.from({ length: 300 }, (_, i) => ({ text: `texto ${i}`, label: "opus", session: `s${i % 60}`, runId: `id-${i}` }));
     const { train, eval: ev } = splitRows(rows, 0.2);
-    const inTrain = new Set(train.map((r) => r.text));
-    expect(ev.some((r) => inTrain.has(r.text))).toBe(false);
+    const inTrain = new Set(train.map((r) => r.session));
     expect(ev.length).toBeGreaterThan(0);
+    expect(ev.some((r) => inTrain.has(r.session))).toBe(false);
+    expect(train.length + ev.length).toBe(300);
     expect(splitRows(rows, 0.2).eval.map((r) => r.runId)).toEqual(ev.map((r) => r.runId));
   });
-  it("el texto se compara sin mayúsculas ni espacios sobrantes", () => {
-    const rows = Array.from({ length: 40 }, (_, i) => [
-      { text: `Hola   mundo ${i}`, runId: `a${i}` }, { text: `hola mundo ${i} `, runId: `b${i}` }
-    ]).flat();
+  it("sin sesión cada fila es su propia sesión (runId)", () => {
+    const rows = Array.from({ length: 100 }, (_, i) => ({ text: "igual", runId: `id-${i}` }));
     const { eval: ev } = splitRows(rows, 0.5);
-    expect(ev.length % 2).toBe(0);
+    expect(ev.length).toBeGreaterThan(10);
+    expect(ev.length).toBeLessThan(90);
   });
 });
 
@@ -215,9 +218,9 @@ describe("semillas por etiqueta", () => {
   });
   it("una semilla sin etiqueta cuenta como opus", () => {
     const out = addSeeds([], [], [{ text: "sin etiqueta local", origin: "historico" }]);
-    const row = [...out.train, ...out.eval].find((r) => r.text === "sin etiqueta local");
+    const row = [...out.train, ...out.eval].find((r) => r.text === ctx("sin etiqueta local"));
     expect(row.label).toBe("opus");
-    expect(withSeeds([], [{ text: "otra sin etiqueta" }]).find((r) => r.text === "otra sin etiqueta").label).toBe("opus");
+    expect(withSeeds([], [{ text: "otra sin etiqueta" }]).find((r) => r.text === ctx("otra sin etiqueta")).label).toBe("opus");
   });
   it("addSeeds reparte cada etiqueta ~75/25 y de forma determinista", () => {
     const a = addSeeds([], []);
@@ -238,7 +241,7 @@ describe("semillas por etiqueta", () => {
     const local = CHOICES.flatMap((label) => Array.from({ length: 120 }, (_, i) => ({ text: `local ${label} ${i}`, label, origin: "historico" })));
     const a = addSeeds([], [], local);
     for (const label of CHOICES) {
-      const e = a.eval.filter((r) => r.label === label && r.text.startsWith("local")).length;
+      const e = a.eval.filter((r) => r.label === label && r.text.startsWith("[mensaje] local")).length;
       expect(e / 120).toBeGreaterThan(0.15);
       expect(e / 120).toBeLessThan(0.35);
     }
@@ -260,9 +263,9 @@ describe("semillas por etiqueta", () => {
 describe("semillas y evaluación", () => {
   it("una semilla cuyo texto está en eval no entra al train", () => {
     const manual = withSeeds([]).find((r) => r.origin === "manual").text;
-    const out = withSeeds([], [{ text: "local", label: "opus", origin: "historico" }], [{ text: manual }, { text: " LOCAL " }]);
+    const out = withSeeds([], [{ text: "local", label: "opus", origin: "historico" }], [{ text: manual }, { text: ctx(" LOCAL ") }]);
     expect(out.some((r) => r.text === manual)).toBe(false);
-    expect(out.some((r) => r.text === "local")).toBe(false);
+    expect(out.some((r) => r.text === ctx("local"))).toBe(false);
     expect(out.length).toBe(withSeeds([]).length - 1);
   });
 });
@@ -302,7 +305,7 @@ describe("addSeeds: reparto de semillas entre train y eval", () => {
   });
   it("las semillas locales también se reparten", () => {
     const out = addSeeds([], [], [{ text: "solo local", label: "opus", origin: "historico" }]);
-    expect([...out.train, ...out.eval].filter((r) => r.text === "solo local")).toHaveLength(1);
+    expect([...out.train, ...out.eval].filter((r) => r.text === ctx("solo local"))).toHaveLength(1);
   });
 });
 
@@ -330,12 +333,12 @@ describe("semillas locales (JSONL fuera del repo)", () => {
     ]);
   });
   it("withSeeds añade las locales como semilla, sin repetir texto de filas ni de manuales", () => {
-    const manual = withSeeds([]).find((r) => r.origin === "manual").text;
-    const extra = [{ text: "local", label: "opus", origin: "historico" }, { text: manual, label: "opus", origin: "historico" }, { text: "fila", label: "opus", origin: "historico" }];
-    const out = withSeeds([{ text: "fila", label: "programador" }], extra);
-    expect(out.filter((r) => r.text === "local")).toEqual([{ text: "local", label: "opus", origin: "historico", source: "semilla" }]);
-    expect(out.filter((r) => r.text === manual)).toHaveLength(1);
-    expect(out.filter((r) => r.text === "fila")).toHaveLength(1);
+    const manualRaw = SEEDS.find((r) => r.origin === "manual").text;
+    const extra = [{ text: "local", label: "opus", origin: "historico" }, { text: manualRaw, label: "opus", origin: "historico" }, { text: "fila", label: "opus", origin: "historico" }];
+    const out = withSeeds([{ text: ctx("fila"), label: "programador" }], extra);
+    expect(out.filter((r) => r.text === ctx("local"))).toEqual([{ text: ctx("local"), label: "opus", origin: "historico", source: "semilla" }]);
+    expect(out.filter((r) => r.text === ctx(manualRaw))).toHaveLength(1);
+    expect(out.filter((r) => r.text === ctx("fila"))).toHaveLength(1);
   });
 });
 
@@ -400,5 +403,76 @@ describe("sourceBreakdown", () => {
       programador: { usuario: 0, auto: 0, semilla: 0 },
       opus: { usuario: 1, auto: 1, semilla: 1 }
     });
+  });
+});
+
+describe("trainingRows con contexto del turno anterior", () => {
+  const ses = (id, sid, t, task, node, over = {}) => run(id, task, { mode: "sesion", startedAt: t, endedAt: t + 5, ...withTask(node), ...over });
+  const runs = [
+    ses("20261001T000000Z-aaaa1111-1", "aaaa1111", 100, "crea el login", "programador"),
+    ses("20261001T000100Z-aaaa1111-2", "aaaa1111", 200, "ahora arréglalo", "asistente"),
+    ses("20261001T000200Z-bbbb2222-1", "bbbb2222", 150, "otra sesión", "programador"),
+    ses("20261001T000300Z-aaaa1111-3", "aaaa1111", 300, "último", "programador")
+  ];
+  const by = (rows) => Object.fromEntries(rows.map((r) => [r.runId, r.text]));
+
+  it("encadena por sesión y orden de tiempo con tarea y ruta real del anterior", () => {
+    const t = by(trainingRows(runs));
+    expect(t["20261001T000000Z-aaaa1111-1"]).toBe("[mensaje] crea el login\n[anterior] ruta=sin_anterior");
+    expect(t["20261001T000100Z-aaaa1111-2"]).toBe("[mensaje] ahora arréglalo\n[anterior] ruta=programador\n[encargo anterior] crea el login");
+    expect(t["20261001T000200Z-bbbb2222-1"]).toContain("ruta=sin_anterior");
+    expect(t["20261001T000300Z-aaaa1111-3"]).toContain("ruta=asistente\n[encargo anterior] ahora arréglalo");
+  });
+  it("no usa la etiqueta del usuario del anterior, solo actualRoute", () => {
+    const rs = [ses("20261001T000000Z-cccc3333-1", "c", 1, "uno", "programador", { routeLabel: { label: "opus", t: 1 }, endedAt: 1 }), ses("20261001T000100Z-cccc3333-2", "c", 2, "dos", "asistente")];
+    expect(by(trainingRows(rs))["20261001T000100Z-cccc3333-2"]).toContain("ruta=programador");
+  });
+  it("el anterior sin ruta (en curso o terminado después) es ninguna", () => {
+    const rs = [ses("20261001T000000Z-dddd4444-1", "d", 1, "uno", "programador", { status: "running", endedAt: null }), ses("20261001T000100Z-dddd4444-2", "d", 2, "dos", "asistente")];
+    expect(by(trainingRows(rs))["20261001T000100Z-dddd4444-2"]).toContain("ruta=ninguna\n[encargo anterior] uno");
+    const tarde = [ses("20261001T000000Z-eeee5555-1", "e", 1, "uno", "programador", { endedAt: 99 }), ses("20261001T000100Z-eeee5555-2", "e", 2, "dos", "asistente")];
+    expect(by(trainingRows(tarde))["20261001T000100Z-eeee5555-2"]).toContain("ruta=ninguna");
+  });
+  it("anti-fuga: solo entra información de runs que empezaron antes", () => {
+    const rows = trainingRows(runs);
+    for (const r of rows) {
+      const me = runs.find((x) => x.id === r.runId);
+      for (const other of runs) {
+        if (other.startedAt < me.startedAt && other.mode === "sesion") continue;
+        if (other.id === me.id) continue;
+        if (other.task.length > 5) expect(r.text.replace(`[mensaje] ${me.task}`, "")).not.toContain(other.task);
+      }
+    }
+  });
+  it("runs que no son de sesión no se encadenan", () => {
+    const rs = [run("a", "uno", { mode: "orquestado", startedAt: 1, ...withTask("programador") }), run("b", "dos", { mode: "orquestado", startedAt: 2, ...withTask("programador") })];
+    expect(trainingRows(rs).every((r) => r.text.includes("sin_anterior"))).toBe(true);
+  });
+  it("el anterior puede ser un run sin etiqueta propia (no filtrado por perfil)", () => {
+    const rs = [ses("20261001T000000Z-ffff6666-1", "f", 1, "uno", "programador", { profile: "personal" }), ses("20261001T000100Z-ffff6666-2", "f", 2, "dos", "asistente")];
+    const out = trainingRows(rs, { profile: "trabajo" });
+    expect(out).toHaveLength(1);
+    expect(out[0].text).toContain("[encargo anterior] uno");
+  });
+  it("las filas llevan sesión y el split nunca separa una sesión", () => {
+    const many = [];
+    for (let s = 0; s < 40; s++) for (let k = 1; k <= 4; k++) {
+      many.push(ses(`20261001T0000${k}0Z-s${String(s).padStart(7, "0")}-${k}`, "x", s * 100 + k, `t${s}-${k}`, "programador"));
+    }
+    const rows = trainingRows(many);
+    expect(rows.every((r) => r.session === r.runId.split("-")[1])).toBe(true);
+    const { train, eval: ev } = splitRows(rows, 0.3);
+    const tr = new Set(train.map((r) => r.session));
+    expect(ev.length).toBeGreaterThan(0);
+    expect(ev.some((r) => tr.has(r.session))).toBe(false);
+  });
+});
+
+describe("semillas con contexto", () => {
+  it("pasan por buildLayaContext con sin_anterior", () => {
+    const seeds = withSeeds([]);
+    expect(seeds.every((r) => /^\[mensaje\] [\s\S]*\n\[anterior\] ruta=sin_anterior$/.test(r.text))).toBe(true);
+    const local = addSeeds([], [], [{ text: "local sola", label: "opus", origin: "historico" }]);
+    expect([...local.train, ...local.eval].some((r) => r.text === "[mensaje] local sola\n[anterior] ruta=sin_anterior")).toBe(true);
   });
 });

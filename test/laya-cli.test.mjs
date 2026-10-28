@@ -17,6 +17,7 @@ describe("parseLayaArgs", () => {
   it("laya-datos: out y perfil", () => {
     expect(parseLayaArgs(["laya-datos"])).toMatchObject({ command: "laya-datos", out: null, profile: "todos", force: false });
     expect(parseLayaArgs(["laya-datos", "--out", "a.csv", "--perfil", "personal"])).toMatchObject({ out: "a.csv", profile: "personal" });
+    expect(parseLayaArgs(["laya-datos", "--forzar"])).toMatchObject({ force: true });
     expect(() => parseLayaArgs(["laya-datos", "--perfil", "x y"])).toThrow(/perfil/);
     expect(() => parseLayaArgs(["laya-datos", "--out"])).toThrow(/--out/);
     expect(() => parseLayaArgs(["laya-datos", "--raro"])).toThrow(/--raro/);
@@ -79,13 +80,24 @@ describe("laya-datos", () => {
     const train = await readFile(out, "utf8");
     const ev = await readFile(join(home, "datos-eval.csv"), "utf8");
     expect(train.split("\n")[0]).toBe("texto,etiqueta,perfil,fuente,runId");
-    const lines = (s) => s.trim().split("\n").length - 1;
+    const lines = (s) => (s.match(/,(auto|usuario|semilla),/g) ?? []).length; // el texto con contexto ocupa varias líneas
     expect(lines(train) + lines(ev)).toBe(85);
     expect(lines(ev)).toBeGreaterThan(5);
-    expect(train).toContain('"Tarea a número');
+    expect(train).toContain("[mensaje] Tarea a número");
     const text = logs.join("\n");
     expect(text).toMatch(/asistente\D+40/);
     expect(text).toMatch(/opus.*menos de 15/s);
+  });
+  it("no pisa archivos existentes salvo --forzar", async () => {
+    await seed("a", 3, "asistente");
+    const out = join(home, "nuevo", "datos.csv");
+    await layaDatos({ store, opts: { out, profile: "todos" }, log });
+    const antes = await readFile(out, "utf8");
+    await expect(layaDatos({ store, opts: { out, profile: "todos" }, log })).rejects.toThrow(/ya existe/);
+    expect(await readFile(out, "utf8")).toBe(antes);
+    await writeFile(out, "viejo");
+    await layaDatos({ store, opts: { out, profile: "todos", force: true }, log });
+    expect(await readFile(out, "utf8")).toContain("texto,etiqueta");
   });
   it("sin --out usa laya-datos.csv en el directorio dado", async () => {
     await seed("a", 3, "asistente");
@@ -132,7 +144,7 @@ describe("laya-entrenar", () => {
     expect(evalRows.filter((r) => r.expected.route === "opus").length).toBeGreaterThan(0);
     expect(evalRows.filter((r) => r.expected.route === "asistente").length).toBeGreaterThan(0);
     const csv = await readFile(join(res.outDir, "datos", "train.csv"), "utf8");
-    expect(csv.split("\n").filter((l) => l.includes(",semilla,")).length).toBe([...t].filter((b) => !b.startsWith("Tarea ")).length);
+    expect((csv.match(/,semilla,/g) ?? []).length).toBe([...t].filter((b) => !b.startsWith("[mensaje] Tarea ")).length);
   });
   it("el mínimo sigue valiendo: sin suficientes ejemplos totales se niega aunque haya semillas", async () => {
     await seed("a", 2, "asistente");
@@ -251,7 +263,7 @@ describe("laya-entrenar", () => {
     const max = Math.max(...["asistente", "programador", "opus"].map((c) => count(trainLabels, c)));
     for (const c of ["asistente", "programador", "opus"]) expect(count(trainLabels, c)).toBe(max);
     // eval sin duplicados: lo que hay en eval.csv
-    const evCsv = (await readFile(join(res.outDir, "datos", "eval.csv"), "utf8")).trim().split("\n").length - 1;
+    const evCsv = ((await readFile(join(res.outDir, "datos", "eval.csv"), "utf8")).match(/,(auto|usuario|semilla),/g) ?? []).length;
     expect(evalLabels).toHaveLength(evCsv);
     const text = logs.join("\n");
     expect(text).toMatch(/Train antes de balancear/);

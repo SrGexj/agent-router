@@ -25,7 +25,7 @@ describe("loadLocalSeeds", () => {
     const rows = Array.from({ length: 20 }, (_, i) => ({ text: `t${i}`, label: "programador", runId: `r${i}` }));
     const { train, eval: ev } = splitRows(rows);
     const seeded = withSeeds(train, [{ text: "local", label: "opus", origin: "historico" }]);
-    expect(seeded.some((r) => r.text === "local")).toBe(true);
-    expect(ev.some((r) => r.text === "local")).toBe(false);
+    expect(seeded.some((r) => r.text === "[mensaje] local\n[anterior] ruta=sin_anterior")).toBe(true);
+    expect(ev.some((r) => r.text.includes("local"))).toBe(false);
   });
 });

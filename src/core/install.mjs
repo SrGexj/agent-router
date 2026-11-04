@@ -12,8 +12,8 @@ export const withoutZshBlock = withoutBlock;
 export const ZSH_START = SHELL_START;
 
 const HOOK_EVENTS = ["UserPromptSubmit", "PreToolUse", "PostToolUse", "SubagentStart", "SubagentStop", "Stop", "StopFailure", "PermissionDenied", "SessionEnd", "Notification", "PreCompact", "SessionStart"];
-// SessionStart solo tras compactar (pendientes) y al arrancar (relevo), con una entrada por origen; el resto, sin filtro.
-const MATCHERS = { SessionStart: ["compact", "startup"] };
+// SessionStart solo tras compactar (pendientes), al arrancar y tras /clear (relevo y memoria), con una entrada por origen; el resto, sin filtro.
+const MATCHERS = { SessionStart: ["compact", "startup", "clear"] };
 
 const cmd = (node, script) => `"${node}" "${script}"`;
 

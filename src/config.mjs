@@ -206,7 +206,8 @@ export function loadConfig(processEnv = process.env, { exists = existsSync, read
     runsDir: join(home, "runs"),
     sessionsDir: join(home, "sessions"),
     pendingDir: join(home, "pendientes"),
-    relevoDir: join(home, "relevo"),
+    // Carpeta de configuración de Claude Code del perfil activo (de ahí sale la memoria del proyecto).
+    claudeDir: env.CLAUDE_CONFIG_DIR || activeProfile?.dir || join(userHome, ".claude"),
     // Contexto (tokens) de la sesión principal a partir del cual el orquestador escribe el relevo.
     relevoTokens: env.ROUTER_RELEVO_TOKENS && Number.isInteger(relevo) && relevo > 0 ? relevo : RELEVO_TOKENS_DEFAULT,
     host,

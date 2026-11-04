@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Hook de las sesiones `co`/`cop`: traduce cada evento de Claude Code a eventos del dashboard.
-// Siempre sale con 0. Solo escribe en stdout al inyectar pendientes tras compactar, el relevo al arrancar o su aviso, el aviso de edición directa y al denegar subagentes bloqueados (blockedAgents) y al bajar de nivel un subagente (layaRouting=downgrade).
+// Siempre sale con 0. Solo escribe en stdout al inyectar pendientes tras compactar, el relevo y la memoria al arrancar o tras /clear, o el aviso de relevo, el aviso de edición directa y al denegar subagentes bloqueados (blockedAgents) y al bajar de nivel un subagente (layaRouting=downgrade).
 import { spawn } from "node:child_process";
 import { appendFile, mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -20,7 +20,7 @@ import { blockEvent, decideBlock, denyOutput } from "../src/core/block-agents.mj
 import { createLayaClassifier } from "../src/core/classifier.mjs";
 import { routeAgent } from "../src/core/laya-routing.mjs";
 import { collectPending, formatPending } from "../src/core/pending.mjs";
-import { decideRelevo, relevoPath, relevoStartupContext, relevoUsedPath } from "../src/core/relevo.mjs";
+import { decideRelevo, memoryIndexPath, relevoPath, relevoStartupContext } from "../src/core/relevo.mjs";
 import { DIRECT_EDIT_WARNING, isDirectEdit } from "../src/core/delegar.mjs";
 import { launchTelemetryFlush } from "../src/core/telemetry-flush.mjs";
 
@@ -137,21 +137,20 @@ async function onSessionStartCompact(payload, now) {
 
 const additionalContext = (hookEventName, text) => process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName, additionalContext: text } }));
 
-// SessionStart (source "startup"): si hay relevo de este perfil y cwd, se inyecta una sola vez y el archivo pasa a .usado-<fecha>.md.
-async function onSessionStartup(payload, now) {
-  const file = relevoPath({ home: config.home, profile: config.profile, cwd: payload.cwd });
-  let md;
-  try { md = await readFile(file, "utf8"); } catch { return; }
-  if (!md.trim()) return;
-  await rename(file, relevoUsedPath(file, now));
-  additionalContext("SessionStart", relevoStartupContext(md));
+// SessionStart (source "clear" o "startup"): inyecta <cwd>/RELEVO.md (si existe) y el MEMORY.md de la memoria del proyecto.
+// El hook no borra RELEVO.md: la sesión lo vuelca a memoria y lo borra ella.
+async function onSessionClearOrStartup(payload) {
+  const read = async (f) => { try { return await readFile(f, "utf8"); } catch { return null; } };
+  const relevoFile = relevoPath({ cwd: payload.cwd });
+  const text = relevoStartupContext({ relevo: await read(relevoFile), memory: await read(memoryIndexPath({ claudeDir: config.claudeDir, cwd: payload.cwd })), relevoFile });
+  if (text) additionalContext("SessionStart", text);
 }
 
 // UserPromptSubmit: una vez por sesión, al pasar el umbral de contexto (dato de la statusline), pide el relevo.
 async function onRelevoCheck(payload, sessions, flags) {
   if (flags.relevoAsked) return;
   const context = await sessions.loadContext(payload.session_id);
-  const text = decideRelevo({ tokens: context?.tokens, threshold: config.relevoTokens, asked: false, path: relevoPath({ home: config.home, profile: config.profile, cwd: payload.cwd }) });
+  const text = decideRelevo({ tokens: context?.tokens, threshold: config.relevoTokens, asked: false, path: relevoPath({ cwd: payload.cwd }) });
   if (!text) return;
   await sessions.saveFlags(payload.session_id, { ...flags, relevoAsked: true });
   additionalContext("UserPromptSubmit", text);
@@ -186,8 +185,8 @@ try {
       try { await onCompactStats(payload, session, store); } catch { /* el coste es accesorio: nunca impide inyectar pendientes */ }
       await onSessionStartCompact(payload, Date.now());
     }
+    if (payload.source === "clear" || payload.source === "startup") await onSessionClearOrStartup(payload);
     if (payload.source === "startup") {
-      await onSessionStartup(payload, Date.now());
       // El primer mensaje aún no tiene assistant en el transcript: el modelo de SessionStart (opcional) cubre ese hueco.
       if (typeof payload.model === "string" && payload.model) {
         try { await sessions.saveFlags(payload.session_id, { ...(await sessions.loadFlags(payload.session_id)), startModel: payload.model }); } catch { /* accesorio */ }

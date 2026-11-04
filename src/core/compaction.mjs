@@ -49,7 +49,7 @@ export const runContext = (run) => (run?.context ? contextState({ relevoAt: RELE
 // Sin eventos durante este tiempo y sin encargos en curso, la ejecución se considera ociosa.
 export const BUSY_MS = 30_000;
 export const CONTEXT_HELP = "Tarea cerrada y memoria al día → /clear. A mitad de tarea → deja que compacte.";
-export const RELEVO_HELP = "Relevo: el orquestador escribe el resumen en el archivo de relevo y tú abres un co/cop nuevo en el proyecto.";
+export const RELEVO_HELP = "Relevo: el orquestador escribe RELEVO.md en la raíz del proyecto y tú tecleas /clear; la sesión nueva lo recibe sola.";
 
 // ¿Hay trabajo en curso? Encargos running o ejecución activa (no esperando al usuario) con eventos recientes.
 export function runBusy(run, now) {

@@ -11,7 +11,7 @@ import {
   RELEVO_TOKENS_DEFAULT, contextState, contextFromStatusline, contextAdvice, runContext, RELEVO_HELP
 } from "../src/core/compaction.mjs";
 import { reduceRun } from "../src/core/reducer.mjs";
-import { slugOfCwd, relevoPath, relevoUsedPath, relevoPrompt, relevoStartupContext, decideRelevo, withRelevoTag } from "../src/core/relevo.mjs";
+import { claudeProjectSlug, memoryIndexPath, relevoPath, relevoPrompt, relevoStartupContext, decideRelevo, withRelevoTag } from "../src/core/relevo.mjs";
 import { buildOrchestratorPrompt } from "../src/core/prompt.mjs";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
@@ -34,25 +34,21 @@ describe("config: ROUTER_RELEVO_TOKENS", () => {
 });
 
 describe("relevo: reglas puras", () => {
-  it("slug del cwd y ruta por perfil", () => {
-    expect(slugOfCwd("/Users/juano/1. Proyectos (local)/app")).toBe("users-juano-1-proyectos-local-app");
-    expect(slugOfCwd("")).toBe("sin-proyecto");
-    expect(slugOfCwd(null)).toBe("sin-proyecto");
-    for (const { id } of PROFILES) {
-      expect(relevoPath({ home: "/h/.agent-router", profile: id, cwd: "/p/app" })).toBe(`/h/.agent-router/relevo/${id}/p-app.md`);
-    }
+  it("relevo en la raíz del cwd, igual para los dos perfiles", () => {
+    expect(relevoPath({ cwd: "/p/app" })).toBe("/p/app/RELEVO.md");
   });
 
-  it("nombre al usarse: <slug>.usado-<fecha ISO>.md", () => {
-    expect(relevoUsedPath("/h/relevo/trabajo/p-app.md", Date.UTC(2026, 9, 21, 8, 30, 5))).toBe("/h/relevo/trabajo/p-app.usado-2026-10-21T08-30-05Z.md");
+  it("slug de proyecto de Claude y ruta del índice de memoria", () => {
+    expect(claudeProjectSlug("/Users/juano/1. Proyectos (local)/agent-router")).toBe("-Users-juano-1--Proyectos--local--agent-router");
+    expect(memoryIndexPath({ claudeDir: "/h/.claude", cwd: "/p/app" })).toBe("/h/.claude/projects/-p-app/memory/MEMORY.md");
   });
 
-  it("mensaje de relevo: umbral, ruta y contenido pedido", () => {
-    const m = relevoPrompt("/h/relevo/trabajo/p-app.md", 150_000);
+  it("mensaje de relevo: umbral, ruta, secciones y /clear", () => {
+    const m = relevoPrompt("/p/app/RELEVO.md", 150_000);
     expect(m).toContain("Relevo: contexto ≥150k.");
-    expect(m).toContain("/h/relevo/trabajo/p-app.md");
-    expect(m).toMatch(/≤40 líneas: objetivo, hecho, pendiente, decisiones tomadas, archivos clave, siguiente paso/);
-    expect(m).toContain("`co`/`cop` nuevo en este proyecto");
+    expect(m).toContain("/p/app/RELEVO.md");
+    for (const sec of ["Hecho", "No hecho", "Pendiente", "Decisiones", "Contexto mínimo"]) expect(m).toContain(sec);
+    expect(m).toContain("/clear");
     expect(relevoPrompt("/r.md", 100_000)).toContain("≥100k");
   });
 
@@ -66,13 +62,18 @@ describe("relevo: reglas puras", () => {
     expect(decideRelevo({ ...ok, tokens: undefined })).toBeNull();
   });
 
-  it("contexto de arranque con el relevo y marca de pendiente de revisar", () => {
-    const c = relevoStartupContext("# Relevo\n- hecho X");
-    expect(c).toMatch(/relevo de la sesión anterior/i);
+  it("contexto de arranque: relevo + memoria, instrucción de volcar y borrar, sin ninguno null", () => {
+    const c = relevoStartupContext({ relevo: "# Relevo\n- hecho X", memory: "- [Nota](n.md)" });
     expect(c).toContain("# Relevo\n- hecho X");
-    expect(c).toMatch(/ya está completo/i);
-    expect(c).toMatch(/marcado como usado/i);
-    expect(c).toMatch(/no lo busques en disco/i);
+    expect(c).toContain("- [Nota](n.md)");
+    expect(c).toMatch(/vuelca un resumen del relevo a la memoria/i);
+    expect(c).toMatch(/hecho \/ no hecho \/ pendiente/);
+    expect(c).toMatch(/Write\/Edit/);
+    expect(c).toMatch(/no lo borra el hook/);
+    const soloMemoria = relevoStartupContext({ relevo: null, memory: "M" });
+    expect(soloMemoria).toContain("M");
+    expect(soloMemoria).not.toMatch(/relevo de la sesión anterior/i);
+    expect(relevoStartupContext({ relevo: " ", memory: null })).toBeNull();
   });
 
   it("etiqueta 'relevo' en la statusline al pasar el umbral, sin tocar el resto", () => {
@@ -122,15 +123,17 @@ describe("relevo: avisos de compaction.mjs", () => {
 });
 
 describe("relevo: instalación y prompt", () => {
-  it("SessionStart corre tras compactar y al arrancar", () => {
+  it("SessionStart corre tras compactar, al arrancar y tras /clear", () => {
     const s = buildCoSettings({ node: "/n", appRoot: "/r" });
-    expect(s.hooks.SessionStart.map((h) => h.matcher).sort()).toEqual(["compact", "startup"]);
+    expect(s.hooks.SessionStart.map((h) => h.matcher).sort()).toEqual(["clear", "compact", "startup"]);
     for (const h of s.hooks.SessionStart) expect(h.hooks[0].command).toBe("\"/n\" \"/r/bin/router-hook.mjs\"");
   });
 
-  it("la regla 7 manda el resumen al archivo de relevo y no al chat", () => {
+  it("la regla 7 manda el resumen a RELEVO.md en la raíz y no al chat", () => {
     const p = buildOrchestratorPrompt({ agents: {}, quota: null, now: 0 });
-    expect(p).toContain("7. El resumen de lo hecho no va al chat: va al archivo de relevo cuando salte el aviso o cuando el usuario cierre la tarea (hecho, pendiente, decisiones). Al usuario, solo lo pendiente o las dudas, en el estilo de su CLAUDE.md (p. ej. caveman), también al relatar informes de subagentes.");
+    expect(p).toContain("7. El resumen de lo hecho no va al chat: va a RELEVO.md en la raíz del proyecto");
+    expect(p).toContain("/clear");
+    expect(p).toContain("Al usuario, solo lo pendiente o las dudas, en el estilo de su CLAUDE.md (p. ej. caveman), también al relatar informes de subagentes.");
     expect(p).not.toMatch(/Cierra solo con lo pendiente/);
   });
 });
@@ -168,7 +171,7 @@ describe.each(PROFILES)("hook de relevo en $alias", ({ id, dir }) => {
     const r = await prompt();
     const o = JSON.parse(r.out);
     expect(o.hookSpecificOutput.hookEventName).toBe("UserPromptSubmit");
-    expect(o.hookSpecificOutput.additionalContext).toBe(relevoPrompt(join(routerHome(), "relevo", id, "proyectos-app.md"), 150_000));
+    expect(o.hookSpecificOutput.additionalContext).toBe(relevoPrompt(join(cwd, "RELEVO.md"), 150_000));
     expect((await prompt()).out).toBe("");
     await saveCtx(240_000);
     expect((await prompt()).out).toBe("");
@@ -181,38 +184,45 @@ describe.each(PROFILES)("hook de relevo en $alias", ({ id, dir }) => {
     expect(JSON.parse(r.out).hookSpecificOutput.additionalContext).toContain("≥80k");
   });
 
-  it("SessionStart startup inyecta el relevo de este perfil y cwd y lo marca como usado", async () => {
-    const dirRelevo = join(routerHome(), "relevo", id);
-    await mkdir(dirRelevo, { recursive: true });
-    await writeFile(join(dirRelevo, "proyectos-app.md"), "# Relevo\nsiguiente paso: tests");
-    const otro = PROFILES.find((p) => p.id !== id);
-    await mkdir(join(routerHome(), "relevo", otro.id), { recursive: true });
-    await writeFile(join(routerHome(), "relevo", otro.id, "proyectos-app.md"), "AJENO");
-    await writeFile(join(dirRelevo, "otro-proyecto.md"), "OTRO CWD");
+  // cwd temporal real con RELEVO.md y memoria falsa en <config>/projects/<slug>/memory/MEMORY.md.
+  async function proyecto({ relevo, memoria }) {
+    const proj = join(home, "proj", "mi app");
+    await mkdir(proj, { recursive: true });
+    if (relevo != null) await writeFile(join(proj, "RELEVO.md"), relevo);
+    if (memoria != null) {
+      const m = join(home, dir, "projects", claudeProjectSlug(proj), "memory");
+      await mkdir(m, { recursive: true });
+      await writeFile(join(m, "MEMORY.md"), memoria);
+    }
+    return proj;
+  }
+  const start = (source, cwd) => runBin("bin/router-hook.mjs", { hook_event_name: "SessionStart", source, session_id: `n-${source}`, cwd }, env());
 
-    const r = await runBin("bin/router-hook.mjs", { hook_event_name: "SessionStart", source: "startup", session_id: "nueva-1", cwd }, env());
-    const ctx = JSON.parse(r.out).hookSpecificOutput;
-    expect(ctx.hookEventName).toBe("SessionStart");
-    expect(ctx.additionalContext).toContain("siguiente paso: tests");
-    expect(ctx.additionalContext).not.toContain("AJENO");
-    expect(ctx.additionalContext).not.toContain("OTRO CWD");
-    const files = (await readdir(dirRelevo)).sort();
-    expect(files).toHaveLength(2);
-    expect(files.some((f) => /^proyectos-app\.usado-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z\.md$/.test(f))).toBe(true);
-    expect(files).toContain("otro-proyecto.md");
-    expect(await readFile(join(routerHome(), "relevo", otro.id, "proyectos-app.md"), "utf8")).toBe("AJENO");
-
-    // Una sola vez: la siguiente sesión no lo recibe de nuevo.
-    expect((await runBin("bin/router-hook.mjs", { hook_event_name: "SessionStart", source: "startup", session_id: "nueva-2", cwd }, env())).out).toBe("");
+  it.each(["clear", "startup"])("SessionStart %s inyecta RELEVO.md y MEMORY.md y no borra el relevo", async (source) => {
+    const proj = await proyecto({ relevo: "# Relevo\nsiguiente paso: tests", memoria: "- [Memoria falsa](m.md)" });
+    const r = await start(source, proj);
+    const o = JSON.parse(r.out).hookSpecificOutput;
+    expect(o.hookEventName).toBe("SessionStart");
+    expect(o.additionalContext).toContain("siguiente paso: tests");
+    expect(o.additionalContext).toContain("Memoria falsa");
+    expect(o.additionalContext).toMatch(/no lo borra el hook/);
+    expect(await readFile(join(proj, "RELEVO.md"), "utf8")).toContain("siguiente paso");
+    expect(await readdir(proj)).toEqual(["RELEVO.md"]);
   });
 
-  it("SessionStart sin relevo no escribe nada y 'resume' no lo consume", async () => {
-    expect((await runBin("bin/router-hook.mjs", { hook_event_name: "SessionStart", source: "startup", session_id: "n3", cwd }, env())).out).toBe("");
-    const dirRelevo = join(routerHome(), "relevo", id);
-    await mkdir(dirRelevo, { recursive: true });
-    await writeFile(join(dirRelevo, "proyectos-app.md"), "x");
-    expect((await runBin("bin/router-hook.mjs", { hook_event_name: "SessionStart", source: "resume", session_id: "n4", cwd }, env())).out).toBe("");
-    expect(await readdir(dirRelevo)).toEqual(["proyectos-app.md"]);
+  it.each(["clear", "startup"])("SessionStart %s sin RELEVO.md solo inyecta la memoria, y sin nada no escribe", async (source) => {
+    const proj = await proyecto({ memoria: "- [Solo memoria](m.md)" });
+    const o = JSON.parse((await start(source, proj)).out).hookSpecificOutput;
+    expect(o.additionalContext).toContain("Solo memoria");
+    expect(o.additionalContext).not.toMatch(/Relevo de la sesión anterior/);
+    const vacio = join(home, "vacio");
+    await mkdir(vacio, { recursive: true });
+    expect((await start(source, vacio)).out).toBe("");
+  });
+
+  it("SessionStart 'resume' no inyecta nada", async () => {
+    const proj = await proyecto({ relevo: "x", memoria: "y" });
+    expect((await start("resume", proj)).out).toBe("");
   });
 
   it("la statusline marca 'relevo' al pasar el umbral y el evento lleva el umbral", async () => {

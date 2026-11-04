@@ -29,7 +29,7 @@ describe("isDirectEdit", () => {
     expect(isDirectEdit(edit({ hook_event_name: "PostToolUse" }))).toBe(false);
   });
   it("memory/ y relevo/ están exentas, en cualquier nivel de la ruta", () => {
-    for (const file_path of ["/h/.claude/projects/x/memory/MEMORY.md", "/h/memory/a.md", "/h/.agent-router/relevo/trabajo/p.md", "C:\\u\\relevo\\personal\\p.md"]) {
+    for (const file_path of ["/h/.claude/projects/x/memory/MEMORY.md", "/h/memory/a.md", "/h/.agent-router/relevo/trabajo/p.md", "/p/app/RELEVO.md", "C:\\u\\relevo\\personal\\p.md"]) {
       expect(isDirectEdit(edit({ tool_input: { file_path } }))).toBe(false);
     }
     // Solo cuentan carpetas completas, no nombres parecidos.

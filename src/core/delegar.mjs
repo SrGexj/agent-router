@@ -2,15 +2,15 @@
 // Puro: la decisión depende solo del payload del hook.
 
 const EDIT_TOOLS = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
-// Carpetas que el orquestador sí escribe él: la memoria de Claude y los archivos de relevo.
+// Carpetas que el orquestador sí escribe él: la memoria de Claude y los archivos de relevo (RELEVO.md en la raíz, o relevo/ antiguos).
 const EXEMPT_DIRS = new Set(["memory", "relevo"]);
 
 export const DIRECT_EDIT_WARNING = "Aviso: el orquestador está editando directamente. Si el contenido ya está decidido, delega a asistente (texto, config, docs) o a programador (código).";
 
 function exempt(path) {
   if (typeof path !== "string" || !path) return false;
-  const dirs = path.split(/[\\/]/).slice(0, -1);
-  return dirs.some((d) => EXEMPT_DIRS.has(d));
+  const parts = path.split(/[\\/]/);
+  return parts.at(-1) === "RELEVO.md" || parts.slice(0, -1).some((d) => EXEMPT_DIRS.has(d));
 }
 
 export function isDirectEdit(p) {

@@ -68,7 +68,7 @@ ${roster || "- (no hay subagentes definidos: haz la tarea tú)"}
 4. Lanza en paralelo los encargos que no dependen entre sí.
 5. Usa isolation: "worktree" solo si hay repositorio git y dos encargos de programador en paralelo van a tocar los mismos archivos. Si tocan archivos distintos, lánzalos sin worktree en el mismo árbol (los worktrees viven en .claude/worktrees y cada escritura ahí puede pedir permiso al usuario).
 6. Revisa cada resultado antes de darlo por bueno (diff, tests). Si un encargo falla, reintenta una vez con más contexto; si vuelve a fallar, hazlo tú o súbelo de nivel.
-7. El resumen de lo hecho no va al chat: va al archivo de relevo cuando salte el aviso o cuando el usuario cierre la tarea (hecho, pendiente, decisiones). Al usuario, solo lo pendiente o las dudas, en el estilo de su CLAUDE.md (p. ej. caveman), también al relatar informes de subagentes.
+7. El resumen de lo hecho no va al chat: va a RELEVO.md en la raíz del proyecto (secciones Hecho, No hecho, Pendiente, Decisiones, Contexto mínimo) cuando salte el aviso, el usuario pida /relevo o cierre la tarea; luego el usuario teclea /clear y la sesión nueva lo recibe sola. Al arrancar con RELEVO.md en contexto, vuélcalo a memoria (hecho / no hecho / pendiente) con Write/Edit y bórralo. Al usuario, solo lo pendiente o las dudas, en el estilo de su CLAUDE.md (p. ej. caveman), también al relatar informes de subagentes.
 8. Para escribir en la memoria (archivos .md de la carpeta memory) usa las herramientas Edit o Write, nunca con Bash (cat >>, echo >, sed -i): con Bash cada escritura pide permiso al usuario.
 
 ${browserSection(browser)}## ${quotaSection(quota, now)}

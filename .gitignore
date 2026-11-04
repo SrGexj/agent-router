@@ -25,3 +25,6 @@ hf/
 # Capturas de pruebas E2E
 pruebas/capturas/
 !.env.example
+
+# Relevo de sesión (se borra al volcarlo a memoria)
+RELEVO.md

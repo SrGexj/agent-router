@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { CHOICES } from "../src/core/classifier.mjs";
+import { CHOICES, sanitizePrompt } from "../src/core/classifier.mjs";
+import { layaText } from "../src/core/laya-routing.mjs";
 import {
   trainingRows, csvField, toCsv, CSV_HEADER, inEvalSet, splitRows, distribution, classWarnings, checkMinimum,
   toJsonl, withSeeds, addSeeds, SEED_EVAL_RATIO, parseLocalSeeds, scoreEval, compareScores, layaTrainArgs,
@@ -9,37 +10,61 @@ import {
 const run = (id, task, over = {}) => ({
   id, task, status: "completed", profile: "trabajo", startedAt: 0, endedAt: 1, tasks: {}, taskOrder: [], ...over
 });
-const withTask = (node) => ({ tasks: { a: { node } }, taskOrder: ["a"] });
+const LONG = "Revisa el módulo de pagos y corrige el redondeo en los totales";
+const enc = (id, node, description = "Arreglar redondeo", prompt = LONG) => ({ id, node, agent: "x", description, prompt });
+const withTasks = (...ts) => ({ tasks: Object.fromEntries(ts.map((t) => [t.id, t])), taskOrder: ts.map((t) => t.id) });
+const withTask = (node) => withTasks(enc("a", node));
 
-describe("trainingRows", () => {
-  it("toma las ejecuciones con etiqueta, con el texto saneado que recibe Laya", () => {
-    const runs = [
-      run("b", 'Revisa esto <pasted_content id="1">uno\ndos\ntres</pasted_content>', withTask("programador")),
-      run("a", "Dime qué opinas", { routeLabel: { label: "opus", t: 1 } }),
-      run("e", "charla sin delegar"),
-      run("c", "tarea fallida", { status: "failed" }),
-      run("d", "   ", {})
-    ];
-    expect(trainingRows(runs)).toEqual([
-      { text: "Dime qué opinas", label: "opus", profile: "trabajo", source: "usuario", runId: "a" },
-      { text: "Revisa esto [texto pegado: 3 líneas]", label: "programador", profile: "trabajo", source: "auto", runId: "b" }
-    ]);
+describe("trainingRows (una fila por encargo)", () => {
+  it("una fila por encargo con description+prompt saneado, el mismo texto que ve Laya", () => {
+    const t = enc("t1", "programador", "Corrige bug", 'Mira esto <pasted_content id="1">uno\ndos\ntres</pasted_content> y arréglalo bien');
+    const rows = trainingRows([run("r1", "mensaje del usuario", withTasks(t))]);
+    expect(rows).toEqual([{ text: layaText(t), label: "programador", profile: "trabajo", source: "auto", runId: "r1#t1", groupId: "r1" }]);
+    expect(rows[0].text).toBe(sanitizePrompt(`${t.description}\n${t.prompt}`).trim());
+    expect(rows[0].text).toContain("[texto pegado: 3 líneas]");
+    expect(rows[0].text).not.toContain("mensaje del usuario");
   });
-  it("excluye runs sin subagente salvo corrección manual; consultor y propio entran como opus", () => {
+  it("varios encargos del mismo run dan varias filas con runId único y estable", () => {
+    const r = run("r1", "x", withTasks(enc("t1", "asistente", "A", LONG + " uno"), enc("t2", "programador", "B", LONG + " dos")));
+    const rows = trainingRows([r]);
+    expect(rows.map((x) => [x.runId, x.label, x.groupId])).toEqual([["r1#t1", "asistente", "r1"], ["r1#t2", "programador", "r1"]]);
+    expect(trainingRows([r])).toEqual(rows);
+  });
+  it("etiqueta por nodo: consultor es opus y propio se excluye", () => {
+    const r = run("r1", "x", withTasks(enc("t1", "consultor", "C", LONG + " c"), enc("t2", "propio", "P", LONG + " p"), enc("t3", "asistente", "A", LONG + " a")));
+    expect(trainingRows([r]).map((x) => [x.runId, x.label])).toEqual([["r1#t1", "opus"], ["r1#t3", "asistente"]]);
+  });
+  it("omite encargos con texto vacío o de menos de 40 caracteres", () => {
+    const r = run("r1", "x", withTasks(enc("t1", "asistente", "", ""), enc("t2", "asistente", "corto", "tarea"), enc("t3", "asistente", "ok", LONG)));
+    expect(trainingRows([r]).map((x) => x.runId)).toEqual(["r1#t3"]);
+  });
+  it("layaText y la fila de entrenamiento dan el mismo string", () => {
+    const t = enc("t1", "programador", "  Desc  ", `  ${LONG}  `);
+    expect(trainingRows([run("r1", "x", withTasks(t))])[0].text).toBe(layaText({ description: t.description, prompt: t.prompt }));
+  });
+  it("sin encargos de subagente no hay filas, ni con run fallido ni con corrección", () => {
     const runs = [
       run("a", "sin nada"),
-      run("b", "corregido", { routeLabel: { label: "programador", t: 1 } }),
-      run("c", "con consultor", withTask("consultor")),
-      run("d", "con propio", withTask("propio"))
+      run("c", "fallida", { status: "failed", ...withTask("programador") }),
+      run("p", "solo propio", withTasks(enc("t", "propio"))),
+      run("d", "corregido sin encargos", { routeLabel: { label: "opus", t: 1 } })
     ];
-    expect(trainingRows(runs).map((r) => [r.runId, r.label, r.source])).toEqual([
-      ["b", "programador", "usuario"], ["c", "opus", "auto"], ["d", "opus", "auto"]
-    ]);
+    expect(trainingRows(runs)).toEqual([]);
+  });
+  it("corrección del usuario: con un solo encargo la fila la toma (fuente usuario)", () => {
+    const r = run("r1", "x", { routeLabel: { label: "opus", t: 1 }, ...withTasks(enc("t1", "programador"), enc("t2", "propio")) });
+    expect(trainingRows([r]).map((x) => [x.label, x.source])).toEqual([["opus", "usuario"]]);
+    const f = run("r2", "x", { status: "failed", routeLabel: { label: "asistente", t: 1 }, ...withTask("programador") });
+    expect(trainingRows([f]).map((x) => [x.label, x.source])).toEqual([["asistente", "usuario"]]);
+  });
+  it("corrección del usuario: con varios encargos no se aplica, las filas conservan el nodo (auto)", () => {
+    const r = run("r1", "x", { routeLabel: { label: "opus", t: 1 }, ...withTasks(enc("t1", "asistente", "A", LONG + " a"), enc("t2", "programador", "B", LONG + " b")) });
+    expect(trainingRows([r]).map((x) => [x.label, x.source])).toEqual([["asistente", "auto"], ["programador", "auto"]]);
   });
   it("filtra por perfil (todos por defecto)", () => {
     const runs = [run("a", "x", { profile: "personal", ...withTask("programador") }), run("b", "y", withTask("programador"))];
-    expect(trainingRows(runs, { profile: "personal" }).map((r) => r.runId)).toEqual(["a"]);
-    expect(trainingRows(runs, { profile: "trabajo" }).map((r) => r.runId)).toEqual(["b"]);
+    expect(trainingRows(runs, { profile: "personal" }).map((r) => r.groupId)).toEqual(["a"]);
+    expect(trainingRows(runs, { profile: "trabajo" }).map((r) => r.groupId)).toEqual(["b"]);
     expect(trainingRows(runs, { profile: "todos" })).toHaveLength(2);
     expect(trainingRows([{ ...run("c", "z", withTask("programador")), profile: undefined }], { profile: "trabajo" })).toHaveLength(1);
   });
@@ -85,6 +110,15 @@ describe("conjunto de evaluación", () => {
     expect(ev.some((r) => inTrain.has(r.text))).toBe(false);
     expect(ev.length).toBeGreaterThan(0);
     expect(splitRows(rows, 0.2).eval.map((r) => r.runId)).toEqual(ev.map((r) => r.runId));
+  });
+  it("todas las filas de un mismo run (groupId) caen del mismo lado", () => {
+    const rows = Array.from({ length: 200 }, (_, i) => ({ text: `texto ${i}`, label: "opus", groupId: `run-${i % 40}`, runId: `run-${i % 40}#t${i}` }));
+    const { train, eval: ev } = splitRows(rows, 0.3);
+    const evGroups = new Set(ev.map((r) => r.groupId));
+    expect(ev.length).toBeGreaterThan(0);
+    expect(train.length).toBeGreaterThan(0);
+    expect(train.some((r) => evGroups.has(r.groupId))).toBe(false);
+    expect(new Set(rows.map((r) => r.runId)).size).toBe(200);
   });
   it("el texto se compara sin mayúsculas ni espacios sobrantes", () => {
     const rows = Array.from({ length: 40 }, (_, i) => [

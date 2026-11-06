@@ -59,7 +59,8 @@ describe("no aplica en el resto del sistema", () => {
     expect(trainingLabel(run)).toBe(null);
     expect(trainingSummary([run]).n).toBe(0);
     expect(trainingRows([run])).toEqual([]);
-    const normal = { ...base("haz algo"), routeLabel: { label: "opus", t: 4 } };
+    const encargo = { id: "t1", node: "programador", agent: "programador", description: "Haz algo", prompt: "Implementa lo que se pide con todo detalle y tests" };
+    const normal = { ...base("haz algo"), routeLabel: { label: "opus", t: 4 }, tasks: { t1: encargo }, taskOrder: ["t1"] };
     expect(trainingRows([normal])).toHaveLength(1);
   });
 });

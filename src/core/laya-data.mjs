@@ -1,27 +1,44 @@
 // Datos para ajustar Laya con las ejecuciones del usuario. Puro: sin E/S ni reloj.
-// Texto = el mismo que recibe Laya en modo sombra (sanitizePrompt); etiqueta = trainingLabel (usuario o auto).
+// Texto = layaText(encargo): el mismo string que ve Laya en producción (PreToolUse de Agent/Task); etiqueta = nodo del encargo.
 import { createHash } from "node:crypto";
-import { CHOICES, buildLayaRequest, sanitizePrompt } from "./classifier.mjs";
+import { CHOICES, buildLayaRequest } from "./classifier.mjs";
 import { trainingLabel } from "./details.mjs";
+import { layaText } from "./laya-routing.mjs";
 import { SEEDS } from "./laya-seeds.mjs";
 
 export const CSV_HEADER = "texto,etiqueta,perfil,fuente,runId";
 export const DEFAULT_EVAL_RATIO = 0.2;
 export const MIN_TOTAL = 60;
 export const MIN_PER_CLASS = 15;
+// Un encargo con menos texto saneado que esto no da señal para entrenar.
+export const MIN_TEXT_LENGTH = 40;
 
 const profileOf = (run) => run?.profile || "trabajo";
 
-// Una fila por ejecución con etiqueta y texto, ordenada por runId para que la salida sea estable.
+// Etiqueta de Laya por nodo del encargo; "propio" (lo lleva Opus sin subagente) no se enruta y queda fuera.
+const NODE_LABEL = { asistente: "asistente", programador: "programador", consultor: "opus" };
+
+// Una fila por encargo a subagente (no por ejecución), ordenada por runId para que la salida sea estable.
+// runId = "<run>#<encargo>" (único y estable); groupId = id del run original, para repartir train/eval por run.
+// Corrección manual (run.routeLabel, fuente "usuario"): es por run, así que solo se aplica si el run tiene UN encargo
+// (sin contar propios): esa fila toma la corrección. Con varios encargos no se sabe a cuál se refiere: las filas
+// conservan la etiqueta de su nodo (fuente auto) y la corrección no se usa.
 export function trainingRows(runs, { profile = "todos" } = {}) {
   const rows = [];
   for (const run of runs ?? []) {
     if (profile !== "todos" && profileOf(run) !== profile) continue;
     const t = trainingLabel(run);
     if (!t) continue;
-    const text = sanitizePrompt(typeof run.task === "string" ? run.task : run.task?.task ?? "").trim();
-    if (!text) continue;
-    rows.push({ text, label: t.label, profile: profileOf(run), source: t.source, runId: run.id });
+    const tasks = (run.taskOrder ?? []).map((id) => run.tasks?.[id]).filter((task) => task && NODE_LABEL[task.node]);
+    const fixed = t.source === "usuario" && tasks.length === 1;
+    for (const task of tasks) {
+      const text = layaText(task);
+      if (text.length < MIN_TEXT_LENGTH) continue;
+      rows.push({
+        text, label: fixed ? t.label : NODE_LABEL[task.node], profile: profileOf(run), source: fixed ? "usuario" : "auto",
+        runId: `${run.id}#${task.id}`, groupId: run.id
+      });
+    }
   }
   return rows.sort((a, b) => (a.runId < b.runId ? -1 : a.runId > b.runId ? 1 : 0));
 }
@@ -89,16 +106,17 @@ export function toCsv(rows) {
   return `${[CSV_HEADER, ...lines].join("\n")}\n`;
 }
 
-// Pertenece al conjunto de evaluación según un hash de la clave (el texto normalizado en splitRows): no cambia al llegar ejecuciones nuevas.
+// Pertenece al conjunto de evaluación según un hash de la clave (el run original o el texto normalizado en splitRows): no cambia al llegar ejecuciones nuevas.
 export function inEvalSet(key, ratio = DEFAULT_EVAL_RATIO) {
   const h = createHash("sha256").update(String(key)).digest().readUInt32BE(0) / 2 ** 32;
   return h < ratio;
 }
 
+// Clave de reparto: el run original si la fila lo trae (todas sus filas al mismo lado); si no, el texto normalizado.
 export function splitRows(rows, ratio = DEFAULT_EVAL_RATIO) {
   const train = [];
   const ev = [];
-  for (const r of rows ?? []) (inEvalSet(r.text != null ? textKey(r.text) : r.runId, ratio) ? ev : train).push(r);
+  for (const r of rows ?? []) (inEvalSet(r.groupId ?? (r.text != null ? textKey(r.text) : r.runId), ratio) ? ev : train).push(r);
   return { train, eval: ev };
 }
 

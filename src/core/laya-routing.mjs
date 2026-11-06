@@ -6,7 +6,7 @@ import { sanitizePrompt } from "./classifier.mjs";
 export const LAYA_ROUTING_MODES = Object.freeze(["off", "shadow", "downgrade"]);
 const AGENT_TOOLS = new Set(["Agent", "Task"]);
 
-// Mismo texto que en los datos de entrenamiento: description + "\n" + prompt, saneado y recortado.
+// Texto que ve Laya y que usan los datos de entrenamiento (laya-data.mjs, una fila por encargo): description + "\n" + prompt, saneado y recortado.
 export const layaText = (input) => sanitizePrompt(`${input?.description ?? ""}\n${input?.prompt ?? ""}`).trim();
 
 // Decisión pura. result = { choice, confidence } o null (error/timeout).

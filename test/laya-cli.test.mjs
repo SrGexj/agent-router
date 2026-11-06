@@ -63,7 +63,7 @@ async function seed(prefix, n, node, profile = "trabajo") {
   for (let i = 0; i < n; i++) {
     const id = `2026${prefix}${String(i).padStart(3, "0")}-1-a`;
     await store.append(id, { type: "run_start", runId: id, task: `Tarea ${prefix} número ${i}, con "comillas"`, mode: "orquestado", model: "opus", cwd: "/", profile, t: 1 });
-    await store.append(id, { type: "task_start", taskId: "a", agent: node === "opus" ? "consultor" : node, description: "d", prompt: "p", t: 2 });
+    await store.append(id, { type: "task_start", taskId: "a", agent: node === "opus" ? "consultor" : node, description: `Tarea ${prefix} número ${i}, con "comillas"`, prompt: `Haz lo que toca en el encargo ${prefix}-${i} con todo el detalle necesario`, t: 2 });
     await store.append(id, { type: "run_end", exitCode: 0, t: 3 });
   }
 }
@@ -79,7 +79,8 @@ describe("laya-datos", () => {
     const train = await readFile(out, "utf8");
     const ev = await readFile(join(home, "datos-eval.csv"), "utf8");
     expect(train.split("\n")[0]).toBe("texto,etiqueta,perfil,fuente,runId");
-    const lines = (s) => s.trim().split("\n").length - 1;
+    // El texto lleva "description\nprompt": hay saltos de línea dentro de campos, se cuentan filas por su cola fuente,runId.
+    const lines = (s) => (s.match(/,(auto|usuario|semilla),[^,\n]*$/gm) ?? []).length;
     expect(lines(train) + lines(ev)).toBe(85);
     expect(lines(ev)).toBeGreaterThan(5);
     expect(train).toContain('"Tarea a número');
@@ -251,7 +252,7 @@ describe("laya-entrenar", () => {
     const max = Math.max(...["asistente", "programador", "opus"].map((c) => count(trainLabels, c)));
     for (const c of ["asistente", "programador", "opus"]) expect(count(trainLabels, c)).toBe(max);
     // eval sin duplicados: lo que hay en eval.csv
-    const evCsv = (await readFile(join(res.outDir, "datos", "eval.csv"), "utf8")).trim().split("\n").length - 1;
+    const evCsv = (await readFile(join(res.outDir, "datos", "eval.csv"), "utf8")).match(/,(auto|usuario|semilla),[^,\n]*$/gm).length;
     expect(evalLabels).toHaveLength(evCsv);
     const text = logs.join("\n");
     expect(text).toMatch(/Train antes de balancear/);
